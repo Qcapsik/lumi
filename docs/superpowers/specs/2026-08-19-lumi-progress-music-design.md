@@ -46,8 +46,8 @@ aiohttp, Pillow 12.3.0). Бот не должен падать ни при ка�
 
 Поведение:
 - Очередь до 50 треков.
-- Конвертация = стримовая: `-re -i url -c copy -f mp3 pipe:1`? Не в 1-й версии:
-  используем chained audio source (discord.py `FFmpegPCMAudio` с stdin из yt-dlp).
+- Проигрывание: `FFmpegPCMAudio` на прямую ссылку аудио, полученную из `yt_dlp
+  extract_info(..., download=False)` (без pipe и без сохранения файлов на диск).
 - Ошибки: yt-dlp недоступен/ошибка извлечения → embed «Не удалось найти трек», очередь не блокируется.
 - Длительность > 3 часов — отклоняем.
 - play_from_search: ytsearch1.
