@@ -648,9 +648,9 @@ async def currency_cmd(ctx, base: str = "RUB"):
 # ── Музыка ─────────────────────────────────────────────────────────────────
 
 @bot.command(name="плей", aliases=["play", "музыка"])
-async def play_cmd(ctx, *, query):
-    if not query.strip():
-        await ctx.send("❌ Укажи название или ссылку: `!плей трек`")
+async def play_cmd(ctx, *, query: str = None):
+    if not query or not query.strip():
+        await ctx.send("❌ Укажи трек или ссылку. Примеры:\n`!плей тело похудело`\n`!плей https://soundcloud.com/...`\n`!плей sc lo-fi` — поиск по SoundCloud")
         return
     voice = ctx.author.voice
     if not voice or not voice.channel:
@@ -741,6 +741,25 @@ async def focus_cmd(ctx, minutes: int = 25):
         return
     db.add_focus_session(ctx.author.id, minutes, ctx.channel.id)
     await ctx.send(f"🎯 Фокус-сессия **{minutes} мин** запущена! Окончу и пришлю отчёт в ЛС.")
+
+
+# ── Обработка ошибок команд ────────────────────────────────────────────────
+
+@bot.event
+async def on_command_error(ctx, error):
+    try:
+        if isinstance(error, commands.MissingRequiredArgument):
+            await ctx.send(f"❌ Не хватает аргументов. `!команды` — список, или посмотри в `!луми_помощь`.")
+        elif isinstance(error, commands.CommandNotFound):
+            return
+        elif isinstance(error, commands.NotOwner):
+            await ctx.send("❌ Эта команда только для владельца.")
+        elif isinstance(error, commands.MaxConcurrencyReached):
+            await ctx.send("⏳ Команда уже выполняется, подожди.")
+        else:
+            print(f"[cmd error] {ctx.command}: {type(error).__name__}: {error}")
+    except Exception:
+        pass
 
 
 # ── Фоновые задачи ────────────────────────────────────────────────────────
