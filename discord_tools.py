@@ -1230,6 +1230,7 @@ async def register_birthday(guild: discord.Guild, member_name_or_id: str, date: 
         if not (1 <= day <= 31 and 1 <= month <= 12):
             return "❌ Неверная дата."
         db.register_birthday_db(guild.id, member.id, member.display_name, month, day, year)
+        await unlock_achievement(guild, member.id, "bday_set")
         return f"🎂 День рождения **{member.display_name}**: {day:02d}.{month:02d}" + (f".{year}" if year else "")
     except ValueError:
         return "❌ Формат даты: ДД.ММ или ДД.ММ.ГГГГ"
@@ -1592,3 +1593,181 @@ async def setup_clan_server(
         return f"🏗️ **Клан-сервер «{clan}» собран!** Операций: {ok}/{len(results)}\n" + "\n".join(results[-8:])
     except Exception as e:
         return f"❌ Ошибка сборки: {e}"
+
+
+# ── Ачивки и профиль-карточка ─────────────────────────────────────────────
+
+ACHIEVEMENTS = {
+    "intro": {"emoji": "💬", "name": "Первое слово", "desc": "Написать первое сообщение"},
+    "msg_100": {"emoji": "🗣️", "name": "Болтун", "desc": "100 сообщений"},
+    "msg_1000": {"emoji": "🎙️", "name": "Оратор", "desc": "1000 сообщений"},
+    "voice_1h": {"emoji": "🎧", "name": "Голосовой", "desc": "1 час в голосовом"},
+    "voice_10h": {"emoji": "📡", "name": "Вещатель", "desc": "10 часов в голосовом"},
+    "lvl_5": {"emoji": "🧭", "name": "Взросление", "desc": "Достигнуть 5 уровня"},
+    "lvl_10": {"emoji": "🚀", "name": "Профи", "desc": "Достигнуть 10 уровня"},
+    "lvl_25": {"emoji": "👑", "name": "Ветеран", "desc": "Достигнуть 25 уровня"},
+    "shop_buy": {"emoji": "🛍️", "name": "Шопоголик", "desc": "Первая покупка в магазине"},
+    "first_transfer": {"emoji": "🤝", "name": "Филантроп", "desc": "Первый перевод кредитов"},
+    "quiz_ok": {"emoji": "🧠", "name": "Эрудит", "desc": "Ответить в викторине"},
+    "poll_vote": {"emoji": "🗳️", "name": "Демократ", "desc": "Проголосовать"},
+    "warner": {"emoji": "🛡️", "name": "Устойчивый", "desc": "Получить предупреждение и остаться"},
+    "bday_set": {"emoji": "🎂", "name": "Именинник", "desc": "Указать день рождения"},
+    "member_year": {"emoji": "⏳", "name": "Ветеран сервера", "desc": "На сервере больше года"},
+}
+
+ACHIEVEMENT_ORDER = list(ACHIEVEMENTS.keys())
+
+
+async def unlock_achievement(
+    guild: discord.Guild, user_id: int, ach_id: str, channel=None
+) -> bool:
+    """Открывает ачивку; при открытии шлёт уведомление. Возвращает True если открыта сейчас."""
+    if ach_id not in ACHIEVEMENTS:
+        return False
+    if not db.add_achievement(user_id, ach_id):
+        return False
+    if channel is None:
+        channel = guild.system_channel
+    if channel is None:
+        return True
+    a = ACHIEVEMENTS[ach_id]
+    member = guild.get_member(user_id) if user_id else None
+    embed = discord.Embed(
+        title=f"{a['emoji']} Ачивка разблокирована!",
+        description=f"**{a['name']}**\n{a['desc']}",
+        color=discord.Color.gold(),
+    )
+    if member:
+        embed.set_author(name=member.display_name, icon_url=member.display_avatar.url)
+    try:
+        await channel.send(embed=embed)
+    except (discord.Forbidden, discord.HTTPException):
+        pass
+    return True
+
+
+async def list_achievements(guild: discord.Guild, member: discord.Member) -> str:
+    opened = {a["ach_id"] for a in db.get_achievements(member.id)}
+    lines = []
+    for ach_id in ACHIEVEMENT_ORDER:
+        a = ACHIEVEMENTS[ach_id]
+        star = "✅" if ach_id in opened else "🔒"
+        lines.append(f"{star} {a['emoji']} **{a['name']}** — {a['desc']}")
+    progress = len([x for x in opened if x in ACHIEVEMENTS])
+    bar_len = 15
+    filled = round(progress / len(ACHIEVEMENTS) * bar_len)
+    bar = "█" * filled + "░" * (bar_len - filled)
+    return (
+        f"🏆 **Ачивки {member.display_name}**: {progress}/{len(ACHIEVEMENTS)}\n"
+        f"`{bar}`\n\n" + "\n".join(lines)
+    )
+
+
+def _load_font(size: int, bold: bool = False):
+    from PIL import ImageFont
+    candidates = (
+        r"C:\Windows\Fonts\segoeuib.ttf" if bold else r"C:\Windows\Fonts\segoeui.ttf",
+        r"C:\Windows\Fonts\arialbd.ttf" if bold else r"C:\Windows\Fonts\arial.ttf",
+    )
+    for path in candidates:
+        try:
+            return ImageFont.truetype(path, size)
+        except (OSError, IOError):
+            continue
+    return ImageFont.load_default()
+
+
+def _rounded_avatar(img, size: int):
+    from PIL import Image, ImageDraw
+    img = img.resize((size, size), Image.LANCZOS).convert("RGBA")
+    mask = Image.new("L", (size, size), 0)
+    draw = ImageDraw.Draw(mask)
+    draw.ellipse((0, 0, size, size), fill=255)
+    out = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    out.paste(img, (0, 0), mask)
+    return out
+
+
+async def render_profile_card(member: discord.Member) -> io.BytesIO | None:
+    """Рисует карточку профиля 600x300 (PNG). Возвращает BytesIO или None при ошибке."""
+    try:
+        from PIL import Image, ImageDraw, ImageFilter
+
+        stats = db.get_member_stats(member.guild.id, member.id)
+        xp = stats.get("xp", 0)
+        level = stats.get("level", 0)
+        credits = db.get_credits(member.guild.id, member.id)
+        messages = stats.get("messages", 0)
+        voice_min = db.get_voice_minutes(member.guild.id, member.id)
+        next_xp = 50 * (level + 1) ** 2
+        prev_xp = 50 * level ** 2
+        pct = min(1.0, (xp - prev_xp) / max(1, next_xp - prev_xp))
+
+        width, height = 600, 300
+        base = Image.new("RGB", (width, height), (30, 31, 42))
+        draw = ImageDraw.Draw(base)
+        for y in range(height):
+            t = y / height
+            r = int(30 + (72 - 30) * t)
+            g = int(31 + (45 - 31) * t)
+            b = int(42 + (85 - 42) * t)
+            draw.line([(0, y), (width, y)], fill=(r, g, b))
+        glow = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+        glow_draw = ImageDraw.Draw(glow)
+        glow_draw.ellipse((width - 260, -140, width + 60, 180), fill=(255, 215, 0, 40))
+        glow = glow.filter(ImageFilter.GaussianBlur(40))
+        base = Image.alpha_composite(base.convert("RGBA"), glow).convert("RGB")
+        draw = ImageDraw.Draw(base)
+
+        avatar = None
+        try:
+            url = member.display_avatar.with_size(128).url
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=8)) as resp:
+                    if resp.status == 200:
+                        avatar = Image.open(io.BytesIO(await resp.read())).convert("RGBA")
+        except Exception:
+            avatar = None
+        if avatar is None:
+            avatar = Image.new("RGBA", (128, 128), (90, 95, 120))
+            md = ImageDraw.Draw(avatar)
+            md.text((64, 58), (member.display_name or "?")[:1].upper(), fill=(255, 255, 255), font=_load_font(48, True), anchor="mm")
+        avatar = _rounded_avatar(avatar, 128)
+        base.paste(avatar, (36, (height - 128) // 2), avatar)
+
+        font_big = _load_font(34, True)
+        font_mid = _load_font(16, bold=True)
+        font_small = _load_font(13)
+
+        label = (member.display_name or member.name)[:24]
+        draw.text((190, 36), label, fill=(255, 255, 255), font=font_big)
+
+        draw.text((190, 86), f"Уровень", fill=(180, 185, 205), font=font_small)
+        draw.text((190, 102), f"{level}", fill=(255, 215, 0), font=_load_font(44, True))
+
+        bar_x, bar_y, bar_w, bar_h = 300, 112, 250, 18
+        draw.rounded_rectangle((bar_x, bar_y, bar_x + bar_w, bar_y + bar_h), radius=9, fill=(70, 72, 92))
+        draw.rounded_rectangle((bar_x, bar_y, bar_x + bar_w * pct, bar_y + bar_h), radius=9, fill=(255, 215, 0))
+        draw.text((bar_x, bar_y + 22), f"XP: {xp} / {next_xp}", fill=(220, 222, 235), font=font_small)
+
+        stats_line = f"💬 {messages} · 🎧 {voice_min} мин · 📖 {credits} 💰"
+        draw.text((190, 158), stats_line, fill=(220, 222, 235), font=font_mid)
+
+        recent = db.last_achievements(member.id, limit=3)
+        ach_text = []
+        for a in recent:
+            info = ACHIEVEMENTS.get(a["ach_id"])
+            if info:
+                ach_text.append(f"{info['emoji']} {info['name']}")
+        if ach_text:
+            draw.text((36, height - 62), "Последние ачивки:", fill=(180, 185, 205), font=font_small)
+            draw.text((36, height - 44), "  ".join(ach_text), fill=(255, 255, 255), font=font_mid)
+        else:
+            draw.text((36, height - 44), "Открой первую ачивку — пиши в чате!", fill=(180, 185, 205), font=font_small)
+
+        buf = io.BytesIO()
+        base.save(buf, format="PNG")
+        buf.seek(0)
+        return buf
+    except Exception:
+        return None

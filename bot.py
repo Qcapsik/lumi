@@ -19,6 +19,7 @@ import aiohttp
 import database as db
 import discord_tools as dt
 import components as comp
+import music
 
 load_dotenv()
 
@@ -37,7 +38,7 @@ MAX_TOOL_ROUNDS = 20
 
 ai_client = AsyncOpenAI(api_key=CLAUDE_API_KEY, base_url=BASE_URL)
 intents = discord.Intents.all()
-bot = commands.Bot(command_prefix="!", intents=intents)
+bot = commands.Bot(command_prefix="!", intents=intents, max_messages=3000)
 
 START_TIME = time.time()
 TOKEN_USAGE = {"input": 0, "output": 0, "total_requests": 0}
@@ -484,6 +485,9 @@ async def member_help(ctx):
             "`!др 15.03` — записать день рождения\n`!варны` — твои предупреждения\n\n"
             "**Утилиты**\n"
             "`!погода <город>` — погода\n`!курс` — курсы валют\n\n"
+            "**Музыка и фокус**\n"
+            "`!плей <трек>` — музыка в голосовом\n`!скип` `!стоп` `!очередь` `!громкость 50` `!повтор` `!выход`\n"
+            "`!фокус 25` — фокус-сессия с отчётом в ЛС\n`!ачивки` — твои награды\n\n"
             "Владелец может также просто писать: **Луми, …** — она всё сделает сама."
         ),
         color=discord.Color.gold(),
@@ -493,9 +497,20 @@ async def member_help(ctx):
 
 @bot.command(name="профиль")
 async def profile_cmd(ctx, *, member=None):
-    target = str(ctx.author.id) if member is None else member
-    text = await dt.get_profile(ctx.guild, target)
-    await ctx.send(text)
+    target = dt.find_member(ctx.guild, member) if member else ctx.author
+    if not target:
+        await ctx.send("❌ Участник не найден.")
+        return
+    img = await dt.render_profile_card(target)
+    if img:
+        embed = discord.Embed(color=discord.Color.gold())
+        embed.set_image(url="attachment://profile.png")
+        try:
+            await ctx.send(embed=embed, file=discord.File(img, filename="profile.png"))
+            return
+        except discord.HTTPException:
+            pass
+    await ctx.send(await dt.get_profile(ctx.guild, str(target.id)))
 
 
 @bot.command(name="топ")
@@ -534,6 +549,7 @@ async def buy_cmd(ctx, *, role_name):
         await ctx.send("❌ Бот не может выдать эту роль (она выше его роли).")
         return
     db.add_credits(ctx.guild.id, ctx.author.id, -item["price"])
+    await dt.unlock_achievement(ctx.guild, ctx.author.id, "shop_buy", channel=ctx.channel)
     await ctx.send(f"✅ Роль **{role.name}** твоя! Списано {item['price']} 💰.")
 
 
@@ -547,6 +563,7 @@ async def transfer_cmd(ctx, member, amount: int):
         await ctx.send("❌ Сумма должна быть положительной.")
         return
     if db.transfer_credits(ctx.guild.id, ctx.author.id, target.id, amount):
+        await dt.unlock_achievement(ctx.guild, ctx.author.id, "first_transfer", channel=ctx.channel)
         await ctx.send(f"✅ Переведено **{amount}** 💰 участнику **{target.display_name}**.")
     else:
         await ctx.send("❌ Недостаточно кредитов.")
@@ -572,6 +589,7 @@ async def warn_cmd(ctx, member, *, reason="Нарушение правил"):
         await ctx.send("❌ Участник не найден.")
         return
     count = db.add_warn(ctx.guild.id, target.id)
+    await dt.unlock_achievement(ctx.guild, target.id, "warner", channel=None)
     try:
         if count >= 3:
             await target.timeout(datetime.timedelta(minutes=30), reason=f"3 варна: {reason}")
@@ -612,6 +630,7 @@ async def bday_cmd(ctx, date=None):
             if not (1 <= day <= 31 and 1 <= month <= 12):
                 raise ValueError
             db.register_birthday_db(ctx.guild.id, member.id, member.display_name, month, day, year)
+            await dt.unlock_achievement(ctx.guild, member.id, "bday_set", channel=None)
             await ctx.send(f"🎂 Записано: {day:02d}.{month:02d}" + (f".{year}" if year else ""))
         except ValueError:
             await ctx.send("❌ Формат: `!др 15.03` или `!др 15.03.2000`")
@@ -633,6 +652,104 @@ async def weather_cmd(ctx, *, city):
 async def currency_cmd(ctx, base: str = "RUB"):
     import services
     await ctx.send(await services.currency(base))
+
+
+# ── Музыка ─────────────────────────────────────────────────────────────────
+
+@bot.command(name="плей", aliases=["play", "музыка"])
+async def play_cmd(ctx, *, query):
+    if not query.strip():
+        await ctx.send("❌ Укажи название или ссылку: `!плей трек`")
+        return
+    voice = ctx.author.voice
+    if not voice or not voice.channel:
+        await ctx.send("❌ Зайди сначала в голосовой канал.")
+        return
+    player = music.get_player(ctx.guild.id, bot)
+    await player.join(voice.channel)
+    track = await asyncio.to_thread(music.search_track, query.strip())
+    if not track:
+        await ctx.send("🔍 Не удалось найти трек. Попробуй иначе: `!плей исполнитель - название`")
+        return
+    result = await player.add_track(track)
+    embed = discord.Embed(title=result, description=f"🎵 **{track['title']}**\n⏱ {music.format_duration(track['duration'])}", color=discord.Color.blue())
+    await ctx.send(embed=embed)
+
+
+@bot.command(name="скип", aliases=["skip", "sk"])
+async def skip_cmd(ctx):
+    player = music.get_player(ctx.guild.id, bot)
+    await ctx.send(await player.skip())
+
+
+@bot.command(name="стоп")
+async def stop_cmd(ctx):
+    player = music.get_player(ctx.guild.id, bot)
+    await ctx.send(await player.stop())
+
+
+@bot.command(name="очередь", aliases=["queue", "q"])
+async def queue_cmd(ctx):
+    player = music.get_player(ctx.guild.id, bot)
+    q = player.queue_list()
+    if not q and not player.current:
+        await ctx.send("🎵 Очередь пуста.")
+        return
+    lines = []
+    if player.current:
+        lines.append(f"▶️ **Сейчас:** {player.current['title']} ({music.format_duration(player.current['duration'])})")
+    for i, t in enumerate(q[:15], 1):
+        lines.append(f"{i}. {t['title']} ({music.format_duration(t['duration'])})")
+    if len(q) > 15:
+        lines.append(f"...и ещё {len(q) - 15} треков")
+    await ctx.send(f"**Очередь ({len(q)})**\n" + "\n".join(lines))
+
+
+@bot.command(name="громкость", aliases=["volume", "vol"])
+async def volume_cmd(ctx, percent: int = 50):
+    if not 1 <= percent <= 100:
+        await ctx.send("❌ Громкость от 1 до 100.")
+        return
+    player = music.get_player(ctx.guild.id, bot)
+    await ctx.send(player.set_volume(percent))
+
+
+@bot.command(name="повтор", aliases=["repeat"])
+async def repeat_cmd(ctx):
+    player = music.get_player(ctx.guild.id, bot)
+    player.repeat = not player.repeat
+    await ctx.send(f"🔁 Повтор очереди: **{'включён' if player.repeat else 'выключен'}**.")
+
+
+@bot.command(name="выход", aliases=["leave"])
+async def leave_cmd(ctx):
+    player = music.get_player(ctx.guild.id, bot)
+    await ctx.send(await player.leave())
+
+
+# ── Ачивки и фокус ─────────────────────────────────────────────────────────
+
+@bot.command(name="ачивки", aliases=["achievements", "награды"])
+async def achievements_cmd(ctx, member=None):
+    target = dt.find_member(ctx.guild, member) if member else ctx.author
+    if not target:
+        await ctx.send("❌ Участник не найден.")
+        return
+    await ctx.send(await dt.list_achievements(ctx.guild, target))
+
+
+@bot.command(name="фокус", aliases=["focus", "помидор"])
+async def focus_cmd(ctx, minutes: int = 25):
+    if not 1 <= minutes <= 120:
+        await ctx.send("❌ От 1 до 120 минут.")
+        return
+    active = db.get_active_focus(ctx.author.id)
+    if active:
+        left = active["minutes"] - int((time.time() - active["started_ts"]) / 60)
+        await ctx.send(f"⏳ Сессия уже идёт (осталось ~{max(left, 1)} мин).")
+        return
+    db.add_focus_session(ctx.author.id, minutes, ctx.channel.id)
+    await ctx.send(f"🎯 Фокус-сессия **{minutes} мин** запущена! Окончу и пришлю отчёт в ЛС.")
 
 
 # ── Фоновые задачи ────────────────────────────────────────────────────────
@@ -703,6 +820,77 @@ async def birthday_loop():
         await asyncio.sleep(3600)
 
 
+async def focus_loop():
+    phrases = ["Отличная сессия!", "Фокус — это суперсила.", "Ты проделал большую работу.", "Мозг прокачан."]
+    while True:
+        try:
+            now = int(time.time())
+            for s in db.due_focus_sessions(now):
+                user = bot.get_user(s["user_id"])
+                db.mark_focus_done(s["id"])
+                if user:
+                    count, total = db.week_focus_stats(s["user_id"])
+                    embed = discord.Embed(
+                        title="🎯 Фокус-сессия завершена!",
+                        description=(
+                            f"Длительность: **{s['minutes']} мин**\n"
+                            f"За неделю: **{count}** сессий, **{total}** минут фокуса\n\n"
+                            f"✨ {random.choice(phrases)}"
+                        ),
+                        color=discord.Color.green(),
+                    )
+                    try:
+                        await user.send(embed=embed)
+                    except (discord.Forbidden, discord.HTTPException):
+                        pass
+        except Exception:
+            pass
+        await asyncio.sleep(20)
+
+
+async def music_loop():
+    while True:
+        try:
+            for gid in list(music._players.keys()):
+                player = music._players[gid]
+                try:
+                    await player.check_idle()
+                except Exception:
+                    pass
+            music.prune_players()
+        except Exception:
+            pass
+        await asyncio.sleep(30)
+
+
+VOICE_STARTED: dict = {}
+VOICE_ACC: dict = {}
+
+
+async def voice_flush_loop():
+    """Раз в минуту копит минуты в голосовых и проверяет голосовые ачивки."""
+    while True:
+        try:
+            await asyncio.sleep(60)
+            now = time.time()
+            for key in list(VOICE_ACC.keys()):
+                guild_id, user_id = key
+                if now - VOICE_ACC[key] >= 60:
+                    delta = int((now - VOICE_ACC[key]) / 60)
+                    VOICE_ACC[key] = now
+                    total = db.add_voice_minutes(guild_id, user_id, max(delta, 1))
+                    guild = bot.get_guild(guild_id)
+                    if not guild:
+                        continue
+                    if 60 <= total < 600:
+                        await dt.unlock_achievement(guild, user_id, "voice_1h", channel=None)
+                    elif total >= 600:
+                        await dt.unlock_achievement(guild, user_id, "voice_10h", channel=None)
+                        await dt.unlock_achievement(guild, user_id, "voice_1h", channel=None)
+        except Exception:
+            pass
+
+
 # ── События ───────────────────────────────────────────────────────────────
 
 @bot.event
@@ -711,7 +899,28 @@ async def on_ready():
     comp.init_components(bot)
     bot.loop.create_task(reminder_loop())
     bot.loop.create_task(birthday_loop())
+    bot.loop.create_task(focus_loop())
+    bot.loop.create_task(music_loop())
+    bot.loop.create_task(voice_flush_loop())
     print(f"🔥 Луми запущена | серверов: {len(bot.guilds)} | инструментов: {len(tools_map)}")
+
+
+@bot.event
+async def on_voice_state_update(member, before, after):
+    try:
+        if member.bot:
+            return
+        key = (member.guild.id, member.id)
+        if before.channel is None and after.channel is not None:
+            VOICE_STARTED[key] = time.time()
+            VOICE_ACC[key] = time.time()
+        elif before.channel is not None and after.channel is None:
+            start = VOICE_STARTED.pop(key, None)
+            if start:
+                db.add_voice_minutes(member.guild.id, member.id, max(int((time.time() - start) / 60), 1))
+                VOICE_ACC.pop(key, None)
+    except Exception:
+        pass
 
 
 @bot.event
@@ -764,6 +973,17 @@ async def on_message(message):
                 xp = random.randint(10, 25)
                 new_xp, level, level_up = db.add_member_message(message.guild.id, message.author.id, xp)
                 db.add_credits(message.guild.id, message.author.id, 5)
+                stats = db.get_member_stats(message.guild.id, message.author.id)
+                await dt.unlock_achievement(message.guild, message.author.id, "intro", channel=None)
+                if stats.get("messages") >= 1000:
+                    await dt.unlock_achievement(message.guild, message.author.id, "msg_1000", channel=None)
+                elif stats.get("messages") >= 100:
+                    await dt.unlock_achievement(message.guild, message.author.id, "msg_100", channel=None)
+                for lvl, ach in ((25, "lvl_25"), (10, "lvl_10"), (5, "lvl_5")):
+                    if level >= lvl:
+                        await dt.unlock_achievement(message.guild, message.author.id, ach, channel=None)
+                if message.author.joined_at and (now - message.author.joined_at.timestamp()) >= 365 * 86400:
+                    await dt.unlock_achievement(message.guild, message.author.id, "member_year", channel=None)
                 if level_up and level > 0:
                     await message.channel.send(
                         f"🎉 **{message.author.display_name}**, новый уровень: **{level}** (+50 💰)!"
@@ -784,6 +1004,7 @@ async def on_message(message):
                 except discord.Forbidden:
                     pass
                 count = db.add_warn(message.guild.id, message.author.id)
+                await dt.unlock_achievement(message.guild, message.author.id, "warner", channel=None)
                 try:
                     if count >= 3:
                         await message.author.timeout(datetime.timedelta(minutes=30), reason="Авто-мод: мат (3 варна)")

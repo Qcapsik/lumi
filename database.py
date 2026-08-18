@@ -192,11 +192,27 @@ def init_db():
                 updated_at TEXT
             );
 
-            CREATE TABLE IF NOT EXISTS guild_channels (
+            CREATE TABLE IF NOT EXISTS achievements (
+                user_id INTEGER NOT NULL,
+                ach_id TEXT NOT NULL,
+                ts INTEGER,
+                PRIMARY KEY (user_id, ach_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS voice_minutes (
                 guild_id INTEGER NOT NULL,
-                purpose TEXT NOT NULL,
-                channel_id INTEGER,
-                PRIMARY KEY (guild_id, purpose)
+                member_id INTEGER NOT NULL,
+                minutes INTEGER DEFAULT 0,
+                PRIMARY KEY (guild_id, member_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS focus_sessions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                started_ts INTEGER NOT NULL,
+                minutes INTEGER NOT NULL,
+                done INTEGER DEFAULT 0,
+                channel_id INTEGER
             );
             """
         )
@@ -864,6 +880,118 @@ def set_guild_channel(guild_id: int, purpose: str, channel_id: int):
             """,
             (guild_id, purpose, channel_id),
         )
+
+
+# ── Ачивки ─────────────────────────────────────────────────────────────────
+
+def add_achievement(user_id: int, ach_id: str) -> bool:
+    """Открывает ачивку. Возвращает True, если открыта впервые."""
+    import time as _t
+    with _conn() as con:
+        cur = con.execute(
+            "INSERT OR IGNORE INTO achievements (user_id, ach_id, ts) VALUES (?, ?, ?)",
+            (user_id, ach_id, int(_t.time())),
+        )
+        return cur.rowcount > 0
+
+
+def has_achievement(user_id: int, ach_id: str) -> bool:
+    with _conn() as con:
+        row = con.execute(
+            "SELECT 1 FROM achievements WHERE user_id = ? AND ach_id = ?", (user_id, ach_id)
+        ).fetchone()
+        return row is not None
+
+
+def get_achievements(user_id: int) -> list[dict]:
+    with _conn() as con:
+        rows = con.execute(
+            "SELECT ach_id, ts FROM achievements WHERE user_id = ? ORDER BY ts ASC", (user_id,)
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def last_achievements(user_id: int, limit: int = 3) -> list[dict]:
+    with _conn() as con:
+        rows = con.execute(
+            "SELECT ach_id, ts FROM achievements WHERE user_id = ? ORDER BY ts DESC LIMIT ?",
+            (user_id, limit),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+# ── Статистика голосовых ───────────────────────────────────────────────────
+
+def add_voice_minutes(guild_id: int, member_id: int, minutes: int) -> int:
+    with _conn() as con:
+        con.execute(
+            """
+            INSERT INTO voice_minutes (guild_id, member_id, minutes) VALUES (?, ?, ?)
+            ON CONFLICT(guild_id, member_id) DO UPDATE SET minutes = minutes + excluded.minutes
+            """,
+            (guild_id, member_id, minutes),
+        )
+        row = con.execute(
+            "SELECT minutes FROM voice_minutes WHERE guild_id = ? AND member_id = ?",
+            (guild_id, member_id),
+        ).fetchone()
+        return row["minutes"] if row else 0
+
+
+def get_voice_minutes(guild_id: int, member_id: int) -> int:
+    with _conn() as con:
+        row = con.execute(
+            "SELECT minutes FROM voice_minutes WHERE guild_id = ? AND member_id = ?",
+            (guild_id, member_id),
+        ).fetchone()
+        return row["minutes"] if row else 0
+
+
+# ── Фокус-сессии ───────────────────────────────────────────────────────────
+
+def add_focus_session(user_id: int, minutes: int, channel_id: int) -> int:
+    import time as _t
+    with _conn() as con:
+        cur = con.execute(
+            "INSERT INTO focus_sessions (user_id, started_ts, minutes, channel_id) VALUES (?, ?, ?, ?)",
+            (user_id, int(_t.time()), minutes, channel_id),
+        )
+        return cur.lastrowid
+
+
+def get_active_focus(user_id: int) -> dict | None:
+    with _conn() as con:
+        row = con.execute(
+            "SELECT * FROM focus_sessions WHERE user_id = ? AND done = 0 ORDER BY id DESC LIMIT 1",
+            (user_id,),
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def due_focus_sessions(now_ts: int) -> list[dict]:
+    with _conn() as con:
+        rows = con.execute(
+            "SELECT * FROM focus_sessions WHERE done = 0 AND started_ts + minutes * 60 <= ?",
+            (now_ts,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def mark_focus_done(fid: int):
+    with _conn() as con:
+        con.execute("UPDATE focus_sessions SET done = 1 WHERE id = ?", (fid,))
+
+
+def week_focus_stats(user_id: int) -> tuple[int, int]:
+    """Возвращает (количество сессий, суммарные минуты) за последние 7 дней."""
+    import time as _t
+    week_ago = int(_t.time()) - 7 * 86400
+    with _conn() as con:
+        rows = con.execute(
+            "SELECT minutes FROM focus_sessions WHERE user_id = ? AND started_ts >= ?",
+            (user_id, week_ago),
+        ).fetchall()
+        return len(rows), sum(r["minutes"] for r in rows)
 
 
 def get_guild_channel(guild_id: int, purpose: str) -> int | None:

@@ -473,6 +473,11 @@ async def handle_interaction(interaction: discord.Interaction) -> bool:
             await interaction.response.send_message(
                 f"✅ Голос учтён: **{poll['options'][idx]}**", ephemeral=True
             )
+            try:
+                import discord_tools as _dt
+                await _dt.unlock_achievement(interaction.guild, interaction.user.id, "poll_vote", channel=None)
+            except Exception:
+                pass
             fresh = db.get_poll(interaction.guild.id, msg_id)
             await _refresh_poll_message(interaction.guild, msg_id, fresh["votes"] if fresh else votes)
         else:
@@ -525,6 +530,11 @@ async def handle_interaction(interaction: discord.Interaction) -> bool:
             )
         else:
             await interaction.response.send_message("❌ Ответ не распознан.", ephemeral=True)
+        try:
+            import discord_tools as _dt
+            await _dt.unlock_achievement(interaction.guild, interaction.user.id, "quiz_ok", channel=None)
+        except Exception:
+            pass
         return True
 
     # ── Тикеты (все форматы custom_id) ──
