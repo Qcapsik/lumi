@@ -223,6 +223,10 @@ SYSTEM_INSTRUCTION = """
 - ДР участников, приветствие новых участников, выдача ролей — всё доступно.
 
 Модерация, эмодзи, инвайты, права, вебхуки — всё доступно. Отвечай кратко по-русски после выполнения.
+
+РЕЖИМЫ РАБОТЫ:
+- Если инструменты недоступны (бесплатный режим без tools) — ты отвечаешь только текстом. НЕ выдумывай, что что-то выполнила. Честно скажи, что выполнила бы через инструменты, и предложи готовые команды из списка: !профиль !ачивки !топ !баланс !магазин !купить !перевести !напомни !др !погода !курс !плей !скип !стоп !фокус !команды.
+- Пиши дружелюбно, коротко, по-русски.
 """
 
 
@@ -302,50 +306,37 @@ async def ai_completion(messages: list, tools: list) -> dict:
         last_err = "Платная модель вернула пустой ответ"
     except Exception as e:
         last_err = f"{type(e).__name__}: {e}"
-    # 2. Бесплатная анонимная модель
-    try:
-        payload = {
-            "model": "openai",
-            "messages": full_messages,
-            "tools": tools,
-            "tool_choice": "auto",
-            "max_tokens": 2000,
-        }
-        headers = {
-            "Content-Type": "application/json",
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126.0 Safari/537.36",
-            "Referer": "https://pollinations.ai/",
-        }
-        timeout = aiohttp.ClientTimeout(total=90)
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                "https://text.pollinations.ai/openai", json=payload, headers=headers, timeout=timeout
-            ) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    msg = (data.get("choices") or [{}])[0].get("message", {})
-                    content = msg.get("content") or None
-                    raw_calls = msg.get("tool_calls") or []
-                    tool_calls = None
-                    if raw_calls:
-                        tool_calls = [
-                            {
-                                "id": tc.get("id") or f"call_{i}",
-                                "type": "function",
-                                "function": {
-                                    "name": tc.get("function", {}).get("name", ""),
-                                    "arguments": tc.get("function", {}).get("arguments", "{}"),
-                                },
-                            }
-                            for i, tc in enumerate(raw_calls)
-                        ]
-                    if content or tool_calls:
-                        return {"content": content, "tool_calls": tool_calls, "provider": "free(pollinations)"}
-                    last_err = "Бесплатная модель вернула пустой ответ"
-                else:
-                    last_err = f"free({resp.status})"
-    except Exception as e:
-        last_err += f" | free: {type(e).__name__}: {e}"
+    # 2. Бесплатная анонимная модель (chat-only: tools анонимно недоступны; лимит 402/429 → ретраи)
+    for attempt in range(4):
+        try:
+            payload = {
+                "model": "openai",
+                "messages": full_messages,
+                "max_tokens": 2000,
+            }
+            headers = {
+                "Content-Type": "application/json",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126.0 Safari/537.36",
+                "Referer": "https://pollinations.ai/",
+            }
+            timeout = aiohttp.ClientTimeout(total=90)
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    "https://text.pollinations.ai/openai", json=payload, headers=headers, timeout=timeout
+                ) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        msg = (data.get("choices") or [{}])[0].get("message", {})
+                        content = msg.get("content") or None
+                        if content:
+                            return {"content": content, "tool_calls": None, "provider": "free(pollinations)"}
+                        last_err = "Бесплатная модель вернула пустой ответ"
+                    else:
+                        last_err = f"free({resp.status})"
+        except Exception as e:
+            last_err = f"free: {type(e).__name__}: {e}"
+        if attempt < 3:
+            await asyncio.sleep((attempt + 1) * 3)
     raise RuntimeError(f"AI недоступен: {last_err}")
 
 
