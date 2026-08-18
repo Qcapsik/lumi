@@ -657,7 +657,14 @@ async def play_cmd(ctx, *, query: str = None):
         await ctx.send("❌ Зайди сначала в голосовой канал.")
         return
     player = music.get_player(ctx.guild.id, bot)
-    await player.join(voice.channel)
+    try:
+        await player.join(voice.channel)
+    except discord.Forbidden:
+        await ctx.send("❌ У бота нет прав заходить в голосовой канал (нужны права Connect и Speak).")
+        return
+    except discord.ClientException as e:
+        await ctx.send(f"❌ Не удалось подключиться: {e}")
+        return
     track = await asyncio.to_thread(music.search_track, query.strip())
     if not track:
         await ctx.send("🔍 Не удалось найти трек. Попробуй иначе: `!плей исполнитель - название`")
@@ -757,7 +764,11 @@ async def on_command_error(ctx, error):
         elif isinstance(error, commands.MaxConcurrencyReached):
             await ctx.send("⏳ Команда уже выполняется, подожди.")
         else:
-            print(f"[cmd error] {ctx.command}: {type(error).__name__}: {error}")
+            print(f"[cmd error] {ctx.command}: {type(error).__name__}: {error}", flush=True)
+            try:
+                await ctx.send(f"❌ Ошибка команды: {type(error).__name__}. Попробуй ещё раз.")
+            except Exception:
+                pass
     except Exception:
         pass
 
