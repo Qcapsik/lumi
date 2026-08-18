@@ -1,0 +1,16 @@
+# В git попадает ТОЛЬКО проект Lumi. Остальное (игры, медиа, логи, БД, секреты) — исключено.
+/*
+!/.gitignore
+!/.env.example
+!/bot.py
+!/components.py
+!/database.py
+!/discord_tools.py
+!/services.py
+!/requirements.txt
+!/LICENSE
+!/README.md
+!/docs/
+
+*.pyc
+__pycache__/
