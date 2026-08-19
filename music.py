@@ -167,7 +167,7 @@ class MusicPlayer:
             return
 
         local_path = None
-        source_args = {}
+        source_args = {"executable": FFMPEG_PATH}
         if _is_youtube(track):
             local_path = await asyncio.to_thread(download_local, track)
             if not local_path:
@@ -178,7 +178,6 @@ class MusicPlayer:
                     self.voice_client.stop()
                 await self._play_next()
                 return
-            source_args["executable"] = FFMPEG_PATH
         else:
             before = "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5"
             ua = (track.get("headers") or {}).get("User-Agent")

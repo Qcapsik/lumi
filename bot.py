@@ -647,6 +647,21 @@ async def currency_cmd(ctx, base: str = "RUB"):
 
 # ── Музыка ─────────────────────────────────────────────────────────────────
 
+def make_player_view() -> discord.ui.View:
+    view = discord.ui.View()
+    buttons = [
+        ("⏭️", "lumi:player:skip", discord.ButtonStyle.secondary),
+        ("⏹️", "lumi:player:stop", discord.ButtonStyle.danger),
+        ("🔁", "lumi:player:repeat", discord.ButtonStyle.secondary),
+        ("🔉", "lumi:player:voldown", discord.ButtonStyle.secondary),
+        ("🔊", "lumi:player:volup", discord.ButtonStyle.secondary),
+        ("👋", "lumi:player:leave", discord.ButtonStyle.secondary),
+    ]
+    for emoji, cid, style in buttons:
+        view.add_item(discord.ui.Button(emoji=emoji, custom_id=cid, style=style))
+    return view
+
+
 @bot.command(name="плей", aliases=["play", "музыка"])
 async def play_cmd(ctx, *, query: str = None):
     if not query or not query.strip():
@@ -671,7 +686,7 @@ async def play_cmd(ctx, *, query: str = None):
         return
     result = await player.add_track(track)
     embed = discord.Embed(title=result, description=f"🎵 **{track['title']}**\n⏱ {music.format_duration(track['duration'])}", color=discord.Color.blue())
-    await ctx.send(embed=embed)
+    await ctx.send(embed=embed, view=make_player_view())
 
 
 @bot.command(name="скип", aliases=["skip", "sk"])

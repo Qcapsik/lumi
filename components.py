@@ -537,6 +537,33 @@ async def handle_interaction(interaction: discord.Interaction) -> bool:
             pass
         return True
 
+    # ── Кнопки музыкального плеера ──
+    if cid.startswith("lumi:player:"):
+        action = cid.split(":")[2]
+        try:
+            import music
+            player = music.get_player(interaction.guild.id, _bot)
+            if action == "skip":
+                out = await player.skip()
+            elif action == "stop":
+                out = await player.stop()
+            elif action == "repeat":
+                player.repeat = not player.repeat
+                out = f"🔁 Повтор очереди: **{'включён' if player.repeat else 'выключен'}**."
+            elif action == "leave":
+                out = await player.leave()
+            elif action == "volup":
+                out = player.set_volume(min(100, int(player.volume * 100) + 10))
+            elif action == "voldown":
+                out = player.set_volume(max(5, int(player.volume * 100) - 10))
+            else:
+                out = None
+            await interaction.response.send_message(out or "🎵", ephemeral=True)
+        except Exception as e:
+            if not interaction.response.is_done():
+                await interaction.response.send_message(f"❌ Ошибка: {e}", ephemeral=True)
+        return True
+
     # ── Тикеты (все форматы custom_id) ──
     if cid == CID_TICKET_OPEN or cid.startswith("lumi:act:ticket_open:"):
         await open_ticket_for_user(interaction)
