@@ -233,6 +233,17 @@ def init_db():
                 added_at TEXT,
                 UNIQUE(user_id, url)
             );
+
+            CREATE TABLE IF NOT EXISTS pets (
+                user_id INTEGER PRIMARY KEY,
+                name TEXT NOT NULL,
+                kind TEXT DEFAULT '🐱',
+                xp INTEGER DEFAULT 0,
+                hunger INTEGER DEFAULT 80,
+                happiness INTEGER DEFAULT 80,
+                last_feed INTEGER DEFAULT 0,
+                created_at TEXT
+            );
             """
         )
 
@@ -1035,6 +1046,77 @@ def recent_speakers(guild_id: int, hours: int = 24) -> list[int]:
             (guild_id, since),
         ).fetchall()
         return [r["user_id"] for r in rows]
+
+
+def top_messages_last_days(guild_id: int, days: int = 7, limit: int = 5) -> list[dict]:
+    """Топ участников по числу сообщений за последние N дней."""
+    from datetime import datetime, timedelta
+    since = (datetime.utcnow() - timedelta(days=days)).isoformat()
+    with _conn() as con:
+        rows = con.execute(
+            """
+            SELECT user_id, COUNT(*) AS cnt FROM chat_history
+            WHERE guild_id = ? AND created_at >= ?
+            GROUP BY user_id ORDER BY cnt DESC LIMIT ?
+            """,
+            (guild_id, since, limit),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def messages_count_last_days(guild_id: int, days: int = 7) -> int:
+    from datetime import datetime, timedelta
+    since = (datetime.utcnow() - timedelta(days=days)).isoformat()
+    with _conn() as con:
+        row = con.execute(
+            "SELECT COUNT(*) AS c FROM chat_history WHERE guild_id = ? AND created_at >= ?",
+            (guild_id, since),
+        ).fetchone()
+        return row["c"] if row else 0
+
+
+# ── Питомцы ─────────────────────────────────────────────────────────────────
+
+def get_pet(user_id: int) -> dict | None:
+    with _conn() as con:
+        row = con.execute("SELECT * FROM pets WHERE user_id = ?", (user_id,)).fetchone()
+        return dict(row) if row else None
+
+
+def create_pet(user_id: int, name: str, kind: str) -> dict:
+    import time as _t
+    with _conn() as con:
+        con.execute(
+            """
+            INSERT OR IGNORE INTO pets (user_id, name, kind, xp, hunger, happiness, last_feed, created_at)
+            VALUES (?, ?, ?, 0, 80, 80, ?, ?)
+            """,
+            (user_id, name, kind, int(_t.time()), _now()),
+        )
+        row = con.execute("SELECT * FROM pets WHERE user_id = ?", (user_id,)).fetchone()
+        return dict(row)
+
+
+def feed_pet(user_id: int, xp: int = 7) -> dict:
+    import time as _t
+    with _conn() as con:
+        con.execute(
+            "UPDATE pets SET hunger = 100, happiness = MIN(100, happiness + 5), xp = xp + ?, last_feed = ? WHERE user_id = ?",
+            (xp, int(_t.time()), user_id),
+        )
+        row = con.execute("SELECT * FROM pets WHERE user_id = ?", (user_id,)).fetchone()
+        return dict(row)
+
+
+def pat_pet(user_id: int, xp: int = 2) -> dict:
+    import time as _t
+    with _conn() as con:
+        con.execute(
+            "UPDATE pets SET happiness = 100, xp = xp + ?, last_feed = ? WHERE user_id = ?",
+            (xp, int(_t.time()), user_id),
+        )
+        row = con.execute("SELECT * FROM pets WHERE user_id = ?", (user_id,)).fetchone()
+        return dict(row)
 
 
 # ── Дневной бонус и серия ───────────────────────────────────────────────────

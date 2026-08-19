@@ -1595,6 +1595,87 @@ async def setup_clan_server(
         return f"❌ Ошибка сборки: {e}"
 
 
+# ── Блекджек ────────────────────────────────────────────────────────────────
+
+BJ_SESSIONS: dict = {}
+
+_BJ_SUITS = ["♠", "♥", "♦", "♣"]
+
+
+def _bj_deal():
+    import random
+    card = random.randint(2, 11)
+    suit = random.choice(_BJ_SUITS)
+    label = "Туз" if card == 11 else str(card)
+    return {"value": card, "suit": suit, "label": label}
+
+
+def _bj_sum(hand) -> int:
+    total = sum(c["value"] for c in hand)
+    aces = sum(1 for c in hand if c["value"] == 11)
+    while total > 21 and aces:
+        total -= 10
+        aces -= 1
+    return total
+
+
+def _bj_cards(hand) -> str:
+    return " ".join(f"{c['suit']}{c['label']}" for c in hand)
+
+
+def bj_new(user_id: int, bet: int, guild_id: int) -> dict:
+    state = {
+        "user_id": user_id,
+        "guild_id": guild_id,
+        "bet": bet,
+        "player": [_bj_deal()],
+        "dealer": [_bj_deal()],
+        "done": False,
+        "result": "",
+    }
+    BJ_SESSIONS[user_id] = state
+    return state
+
+
+def bj_status(state: dict) -> str:
+    if not state or state.get("done"):
+        return ""
+    return f"Ваши карты: **{_bj_sum(state['player'])}** · Дилер: **{_bj_cards(state['dealer'])}**"
+
+
+def bj_hit(state: dict) -> str:
+    if not state or state.get("done"):
+        return ""
+    state["player"].append(_bj_deal())
+    total = _bj_sum(state["player"])
+    if total > 21:
+        state["done"] = True
+        state["result"] = f"Перебор ({total}) — проигрыш **-{state['bet']}**."
+        return state["result"] + "\n" + _bj_cards(state["player"])
+    if total == 21:
+        state["done"] = True
+        state["result"] = f"Блекджек! **+{state['bet']}**!"
+        return state["result"] + "\n" + _bj_cards(state["player"])
+    return f"Ваши карты ({total}): " + _bj_cards(state["player"])
+
+
+def bj_stand(state: dict) -> str:
+    if not state or state.get("done"):
+        return ""
+    while _bj_sum(state["dealer"]) < 17:
+        state["dealer"].append(_bj_deal())
+    p, d = _bj_sum(state["player"]), _bj_sum(state["dealer"])
+    state["done"] = True
+    if d > 21 or p > d:
+        win = state["bet"]
+        state["result"] = f"Вы победили! **+{win}**!"
+    elif p == d:
+        state["result"] = "Ничья — ставка возвращена."
+    else:
+        state["result"] = f"Дилер побеждает — проигрыш **-{state['bet']}**."
+    return f"{state['result']}\nВы: {_bj_cards(state['player'])} ({p}) · Дилер: {_bj_cards(state['dealer'])} ({d})"
+
+
 # ── Ачивки и профиль-карточка ─────────────────────────────────────────────
 
 ACHIEVEMENTS = {
@@ -1615,6 +1696,8 @@ ACHIEVEMENTS = {
     "member_year": {"emoji": "⏳", "name": "Ветеран сервера", "desc": "На сервере больше года"},
     "daily_7": {"emoji": "📅", "name": "Неделя наград", "desc": "Забирать дневной бонус 7 дней подряд"},
     "fav_first": {"emoji": "💖", "name": "Коллекционер", "desc": "Добавить первый трек в избранное"},
+    "pet_10": {"emoji": "🐾", "name": "Зоотехник", "desc": "Прокачать питомца до 10 уровня"},
+    "duel_first": {"emoji": "⚔️", "name": "Дуэлянт", "desc": "Выиграть первую дуэль"},
 }
 
 ACHIEVEMENT_ORDER = list(ACHIEVEMENTS.keys())

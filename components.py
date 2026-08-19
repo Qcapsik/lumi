@@ -537,6 +537,42 @@ async def handle_interaction(interaction: discord.Interaction) -> bool:
             pass
         return True
 
+    # ── Кнопки блекджека ──
+    if cid in ("lumi:bj:hit", "lumi:bj:stand"):
+        try:
+            import discord_tools as _dt
+            state = _dt.BJ_SESSIONS.get(interaction.user.id)
+            if not state or state.get("done"):
+                await interaction.response.send_message("❌ У тебя нет активной партии: `!бдж 50`", ephemeral=True)
+                return True
+            text = _dt.bj_hit(state) if cid == "lumi:bj:hit" else _dt.bj_stand(state)
+            win = None
+            if state.get("done"):
+                if state["result"].startswith(("Вы победили", "Блекджек")):
+                    win = state["bet"]
+                elif "Ничья" in state["result"]:
+                    win = 0
+                else:
+                    win = -state["bet"]
+                if win:
+                    db.add_credits(state["guild_id"], interaction.user.id, win)
+            embed = discord.Embed(title="🃏 Блекджек", color=0x17181A)
+            if state.get("done"):
+                embed.add_field(name="🔚 Итог", value=state.get("result", ""), inline=False)
+            embed.add_field(name=f"Ваши карты ({_dt._bj_sum(state['player'])})", value=_dt._bj_cards(state["player"]), inline=True)
+            embed.add_field(name="Дилер", value=_dt._bj_cards(state["dealer"]), inline=True)
+            embed.set_footer(text=f"Ставка: {state['bet']} кредитов")
+            view = None
+            if not state.get("done"):
+                view = discord.ui.View()
+                view.add_item(discord.ui.Button(emoji="🎴", label="Ещё", custom_id="lumi:bj:hit", style=discord.ButtonStyle.success, row=0))
+                view.add_item(discord.ui.Button(emoji="⏹", label="Стоп", custom_id="lumi:bj:stand", style=discord.ButtonStyle.danger, row=0))
+            await interaction.response.edit_message(embed=embed, view=view)
+        except Exception as e:
+            if not interaction.response.is_done():
+                await interaction.response.send_message(f"❌ Ошибка: {e}", ephemeral=True)
+        return True
+
     # ── Кнопки казино ──
     if cid.startswith("lumi:casino:"):
         game = cid.split(":")[2]

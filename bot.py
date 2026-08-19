@@ -914,6 +914,167 @@ async def top_voice_cmd(ctx, limit: int = 10):
     await ctx.send("🎧 **Доска почёта голосовых**\n" + "\n".join(lines))
 
 
+# ── Дуэли ────────────────────────────────────────────────────────────────────
+
+@bot.command(name="дуэль", aliases=["duel", "поединок"])
+async def duel_cmd(ctx, member: discord.Member = None, amount: int = 20):
+    import random
+    if not member or member.bot:
+        await ctx.send("❌ Укажи участника: `!дуэль @юзер 50`")
+        return
+    if member.id == ctx.author.id:
+        await ctx.send("❌ С самим собой нельзя.")
+        return
+    if amount < 5:
+        await ctx.send("❌ Минимальная ставка 5 кредитов.")
+        return
+    if (db.get_credits(ctx.guild.id, ctx.author.id) < amount
+            or db.get_credits(ctx.guild.id, member.id) < amount):
+        await ctx.send("❌ У одного из участников не хватает кредитов.")
+        return
+    db.add_credits(ctx.guild.id, ctx.author.id, -amount)
+    db.add_credits(ctx.guild.id, member.id, -amount)
+    winner = random.choice([ctx.author, member])
+    loser = member if winner == ctx.author else ctx.author
+    db.add_credits(ctx.guild.id, winner.id, amount * 2)
+    await ctx.send(
+        f"⚔️ **Дуэль!** {ctx.author.display_name} против {member.display_name} (ставка {amount})…\n"
+        f"🏆 Победитель: **{winner.display_name}** — забирает {amount * 2} кредитов!"
+    )
+    await dt.unlock_achievement(ctx.guild, winner.id, "duel_first", channel=ctx.channel)
+
+
+# ── Блекджек ─────────────────────────────────────────────────────────────────
+
+def make_bj_view() -> discord.ui.View:
+    view = discord.ui.View()
+    view.add_item(discord.ui.Button(emoji="🎴", label="Ещё", custom_id="lumi:bj:hit", style=discord.ButtonStyle.success, row=0))
+    view.add_item(discord.ui.Button(emoji="⏹", label="Стоп", custom_id="lumi:bj:stand", style=discord.ButtonStyle.danger, row=0))
+    return view
+
+
+def bj_embed(state: dict) -> discord.Embed:
+    total = dt._bj_sum(state["player"])
+    embed = discord.Embed(title="🃏 Блекджек", color=0x17181A)
+    if state.get("done"):
+        embed.add_field(name="🔚 Итог", value=state.get("result", ""), inline=False)
+    embed.add_field(
+        name=f"Ваши карты ({total})",
+        value=dt._bj_cards(state["player"]),
+        inline=True,
+    )
+    embed.add_field(
+        name="Дилер",
+        value=dt._bj_cards(state["dealer"]),
+        inline=True,
+    )
+    embed.set_footer(text=f"Ставка: {state['bet']} кредитов")
+    return embed
+
+
+@bot.command(name="бдж", aliases=["блекджек", "blackjack", "bj"])
+async def bj_cmd(ctx, amount: int = 10):
+    bet = _bet_check(ctx, amount)
+    if bet is None:
+        await ctx.send("❌ Минимальная ставка 5, и у тебя должно хватать кредитов.")
+        return
+    if ctx.author.id in dt.BJ_SESSIONS and not dt.BJ_SESSIONS[ctx.author.id].get("done"):
+        await ctx.send("❌ У тебя уже идёт партия!")
+        return
+    db.add_credits(ctx.guild.id, ctx.author.id, -bet)
+    state = dt.bj_new(ctx.author.id, bet, ctx.guild.id)
+    await ctx.send(embed=bj_embed(state), view=make_bj_view())
+
+
+# ── Питомец-тамагочи ─────────────────────────────────────────────────────────
+
+PET_KINDS = ["🐱", "🐶", "🐹", "🐰", "🦊", "🐼", "🐥", "🐸"]
+
+
+def pet_state(pet: dict) -> dict:
+    import time as _t
+    now = int(_t.time())
+    hours = max(0, (now - (pet.get("last_feed") or 0)) / 3600)
+    hunger = max(0, min(100, (pet.get("hunger") or 0) - hours * 3))
+    happiness = pet.get("happiness") or 0
+    if hunger < 30:
+        happiness = max(0, happiness - 15)
+    level = int(((pet.get("xp") or 0) / 50) ** 0.5)
+    return {"hunger": hunger, "happiness": happiness, "level": level}
+
+
+def pet_bar(value: float) -> str:
+    seg = 10
+    filled = max(0, min(seg, round(value / 100 * seg)))
+    return "▓" * filled + "░" * (seg - filled)
+
+
+@bot.command(name="питомец", aliases=["pet", "питомцы"])
+async def pet_cmd(ctx, *, name: str = None):
+    import random
+    pet = db.get_pet(ctx.author.id)
+    if not pet:
+        if not name:
+            await ctx.send("❌ У тебя нет питомца. Заведи: `!питомец Барсик` (100 кредитов)")
+            return
+        if db.get_credits(ctx.guild.id, ctx.author.id) < 100:
+            await ctx.send("❌ Заведение питомца стоит 100 кредитов.")
+            return
+        db.add_credits(ctx.guild.id, ctx.author.id, -100)
+        pet = db.create_pet(ctx.author.id, name.strip()[:24], random.choice(PET_KINDS))
+        await ctx.send(f"🐾 Поздравляю! Твой питомец — **{pet['name']}** {pet['kind']}!\nКорми его: `!покормить`")
+        return
+    st = pet_state(pet)
+    next_xp = 50 * (st["level"] + 1) ** 2
+    embed = discord.Embed(
+        title=f"{pet['kind']} {pet['name']} — уровень {st['level']}",
+        description=(
+            f"😋 Сытость: {pet_bar(st['hunger'])} `{int(st['hunger'])}%`\n"
+            f"💛 Настроение: {pet_bar(st['happiness'])} `{int(st['happiness'])}%`\n"
+            f"✨ XP: {pet.get('xp')} / {next_xp}"
+        ),
+        color=0x17181A,
+    )
+    embed.set_footer(text="!покормить (25 ₭) · !погладить (бесплатно)")
+    await ctx.send(embed=embed)
+
+
+@bot.command(name="покормить", aliases=["корм", "feed"])
+async def feed_pet_cmd(ctx):
+    pet = db.get_pet(ctx.author.id)
+    if not pet:
+        await ctx.send("❌ У тебя нет питомца: `!питомец Барсик`")
+        return
+    if db.get_credits(ctx.guild.id, ctx.author.id) < 25:
+        await ctx.send("❌ Корм стоит 25 кредитов.")
+        return
+    import time as _t
+    now = int(_t.time())
+    last_feed = pet.get("last_feed") or 0
+    if now - last_feed < 1800:
+        await ctx.send(f"🍖 {pet['name']} ещё сыт (можно кормить раз в 30 минут).")
+        return
+    db.add_credits(ctx.guild.id, ctx.author.id, -25)
+    pet = db.feed_pet(ctx.author.id, 7)
+    st = pet_state(pet)
+    await ctx.send(f"🍖 **{pet['name']}** поел! +7 XP · сытость {int(st['hunger'])}%")
+    if st["level"] >= 10:
+        await dt.unlock_achievement(ctx.guild, ctx.author.id, "pet_10", channel=ctx.channel)
+
+
+@bot.command(name="погладить", aliases=["гладить", "pat"])
+async def pat_pet_cmd(ctx):
+    pet = db.get_pet(ctx.author.id)
+    if not pet:
+        await ctx.send("❌ У тебя нет питомца: `!питомец Барсик`")
+        return
+    pet = db.pat_pet(ctx.author.id, 2)
+    st = pet_state(pet)
+    await ctx.send(f"🤗 Ты погладил **{pet['name']}**! +2 XP · настроение {int(st['happiness'])}%")
+    if st["level"] >= 10:
+        await dt.unlock_achievement(ctx.guild, ctx.author.id, "pet_10", channel=ctx.channel)
+
+
 # ── Избранные треки ────────────────────────────────────────────────────────
 
 def _favorite_to_track(fav: dict) -> dict:
@@ -1211,6 +1372,61 @@ async def lottery_loop():
             pass
 
 
+_last_digest_week: str = ""
+
+
+async def weekly_digest_loop():
+    """Воскресенье: еженедельный дайджест сервера в системный канал."""
+    global _last_digest_week
+    while True:
+        try:
+            from datetime import datetime
+            now = datetime.now()
+            week = now.isocalendar()[1]
+            if now.weekday() == 6 and now.hour >= 12 and week != _last_digest_week:
+                _last_digest_week = str(week)
+                for guild in bot.guilds:
+                    if not guild.system_channel:
+                        continue
+                    try:
+                        top = db.top_messages_last_days(guild.id, 7, 5)
+                        total_msg = db.messages_count_last_days(guild.id, 7)
+                        voice_top = db.top_voice_minutes(guild.id, 3)
+                        new_members = [m for m in guild.members if m.joined_at]
+                        import datetime as _dt
+                        week_ago = _dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(days=7)
+                        new_members = [m for m in new_members if m.joined_at >= week_ago and not m.bot]
+                        lines = [f"📊 За неделю написано **{total_msg}** сообщений!"]
+                        if top:
+                            lines.append("\n**🏆 Самые активные:**")
+                            medals = ["🥇", "🥈", "🥉"]
+                            for i, r in enumerate(top):
+                                m = guild.get_member(r["user_id"])
+                                name = m.display_name if m else f"id {r['user_id']}"
+                                medal = medals[i] if i < 3 else f"`{i + 1}.`"
+                                lines.append(f"{medal} **{name}** — {r['cnt']} сообщений")
+                        if voice_top:
+                            lines.append("\n**🎧 Голосовые:**")
+                            for i, r in enumerate(voice_top[:3]):
+                                m = guild.get_member(r["member_id"])
+                                name = m.display_name if m else f"id {r['member_id']}"
+                                lines.append(f"🔊 **{name}** — {r['minutes'] // 60} ч {r['minutes'] % 60} мин")
+                        if new_members:
+                            lines.append(f"\n👋 Нас стало больше на **{len(new_members)}**: "
+                                         + ", ".join(m.display_name for m in new_members[:5]))
+                        embed = discord.Embed(
+                            title="📅 Недельный дайджест",
+                            description="\n".join(lines),
+                            color=discord.Color.gold(),
+                        )
+                        await guild.system_channel.send(embed=embed)
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+        await asyncio.sleep(1800)
+
+
 def _progress_bar(player) -> str:
     total = int(player.current.get("duration") or 0) if player.current else 0
     elapsed = player.progress_seconds()
@@ -1290,6 +1506,7 @@ async def on_ready():
     bot.loop.create_task(focus_loop())
     bot.loop.create_task(music_loop())
     bot.loop.create_task(lottery_loop())
+    bot.loop.create_task(weekly_digest_loop())
     bot.loop.create_task(voice_flush_loop())
     print(f"🔥 Луми запущена | серверов: {len(bot.guilds)} | инструментов: {len(tools_map)}")
 
