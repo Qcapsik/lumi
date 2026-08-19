@@ -128,6 +128,8 @@ class MusicPlayer:
         self.voice_client: discord.VoiceClient | None = None
         self.last_activity = time.time()
         self._playing = False
+        self.started_at = 0.0
+        self.control_message = None
 
     @property
     def is_playing(self) -> bool:
@@ -155,6 +157,7 @@ class MusicPlayer:
         if not self.queue:
             self._playing = False
             self.current = None
+            self.started_at = 0.0
             self.last_activity = time.time()
             return
         track = self.queue.pop(0)
@@ -198,6 +201,7 @@ class MusicPlayer:
             self._playing = False
             return
         print(f"[music] playing: {track['title']}", flush=True)
+        self.started_at = time.time()
 
     def _after_playback(self, error):
         self._playing = False
@@ -212,6 +216,11 @@ class MusicPlayer:
             self.current = None
         asyncio.run_coroutine_threadsafe(self._play_next(), self.bot.loop)
 
+    def progress_seconds(self) -> int:
+        if not self._playing or not self.current:
+            return 0
+        return int(time.time() - self.started_at)
+
     async def skip(self) -> str:
         if self.voice_client and self.voice_client.is_playing():
             self.voice_client.stop()
@@ -224,6 +233,7 @@ class MusicPlayer:
     async def stop(self) -> str:
         self.queue.clear()
         self.current = None
+        self.started_at = 0.0
         if self.voice_client and self.voice_client.is_playing():
             self.voice_client.stop()
         return "⏹ Остановлено, очередь очищена."
@@ -237,6 +247,7 @@ class MusicPlayer:
     async def leave(self):
         self.queue.clear()
         self.current = None
+        self.started_at = 0.0
         if self.voice_client:
             if self.voice_client.is_playing():
                 self.voice_client.stop()

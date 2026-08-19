@@ -1613,6 +1613,8 @@ ACHIEVEMENTS = {
     "warner": {"emoji": "🛡️", "name": "Устойчивый", "desc": "Получить предупреждение и остаться"},
     "bday_set": {"emoji": "🎂", "name": "Именинник", "desc": "Указать день рождения"},
     "member_year": {"emoji": "⏳", "name": "Ветеран сервера", "desc": "На сервере больше года"},
+    "daily_7": {"emoji": "📅", "name": "Неделя наград", "desc": "Забирать дневной бонус 7 дней подряд"},
+    "fav_first": {"emoji": "💖", "name": "Коллекционер", "desc": "Добавить первый трек в избранное"},
 }
 
 ACHIEVEMENT_ORDER = list(ACHIEVEMENTS.keys())

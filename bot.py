@@ -477,7 +477,10 @@ async def member_help(ctx):
             "**Утилиты**\n"
             "`!погода <город>` — погода\n`!курс` — курсы валют\n\n"
             "**Музыка и фокус**\n"
-            "`!плей <трек>` — музыка в голосовом\n`!скип` `!стоп` `!очередь` `!громкость 50` `!повтор` `!выход`\n"
+            "`!плей <трек>` — музыка (кнопки ⏭️⏹️🔁🔉🔊👋 под треком)\n"
+            "`!люб <название>` — в избранное · `!любимое 3` — играть №3 · `!любимое 0` — весь плейлист · `!любимое -3` — удалить\n"
+            "`!скип` `!стоп` `!очередь` `!громкость 50` `!повтор` `!выход`\n"
+            "`!день` — ежедневный бонус (серия до 150 монет)\n"
             "`!фокус 25` — фокус-сессия с отчётом в ЛС\n`!ачивки` — твои награды\n\n"
             "Владелец может также просто писать: **Луми, …** — она всё сделает сама."
         ),
@@ -686,7 +689,8 @@ async def play_cmd(ctx, *, query: str = None):
         return
     result = await player.add_track(track)
     embed = discord.Embed(title=result, description=f"🎵 **{track['title']}**\n⏱ {music.format_duration(track['duration'])}", color=discord.Color.blue())
-    await ctx.send(embed=embed, view=make_player_view())
+    msg = await ctx.send(embed=embed, view=make_player_view())
+    player.control_message = msg
 
 
 @bot.command(name="скип", aliases=["skip", "sk"])
@@ -738,6 +742,144 @@ async def repeat_cmd(ctx):
 async def leave_cmd(ctx):
     player = music.get_player(ctx.guild.id, bot)
     await ctx.send(await player.leave())
+
+
+# ── Дневной бонус ──────────────────────────────────────────────────────────
+
+@bot.command(name="день", aliases=["daily", "бонус"])
+async def daily_cmd(ctx):
+    from datetime import datetime, timedelta
+    now = datetime.now()
+    today = now.strftime("%Y-%m-%d")
+    yesterday = (now - timedelta(days=1)).strftime("%Y-%m-%d")
+    res = db.claim_daily(ctx.author.id, today, yesterday)
+    if not res["first"]:
+        st = db.get_daily_streak(ctx.author.id)
+        embed = discord.Embed(
+            title="🎁 Бонус уже получен",
+            description=f"Приходи завтра! Текущая серия: **{st['streak']}** дней.",
+            color=discord.Color.orange(),
+        )
+        await ctx.send(embed=embed)
+        return
+    db.add_credits(ctx.guild.id, ctx.author.id, res["reward"])
+    embed = discord.Embed(
+        title="🎁 Дневной бонус!",
+        description=(
+            f"+**{res['reward']}** кредитов\n"
+            f"🔥 Серия: **{res['streak']}** дней подряд (рекорд: {res['best']})\n"
+            f"💳 Баланс: **{db.get_credits(ctx.guild.id, ctx.author.id)}**"
+        ),
+        color=discord.Color.gold(),
+    )
+    await ctx.send(embed=embed)
+    if res["streak"] >= 7:
+        await dt.unlock_achievement(ctx.guild, ctx.author.id, "daily_7", channel=ctx.channel)
+
+
+# ── Избранные треки ────────────────────────────────────────────────────────
+
+def _favorite_to_track(fav: dict) -> dict:
+    return {
+        "title": fav["title"],
+        "url": fav["url"],
+        "id": f"fav{fav['id']}",
+        "duration": fav.get("duration") or 0,
+        "thumbnail": fav.get("thumb"),
+        "webpage_url": fav.get("webpage_url") or "",
+        "uploader": "Избранное",
+        "headers": {},
+    }
+
+
+async def _require_voice(ctx):
+    if not ctx.author.voice or not ctx.author.voice.channel:
+        await ctx.send("❌ Зайди сначала в голосовой канал.")
+        return None
+    player = music.get_player(ctx.guild.id, bot)
+    try:
+        await player.join(ctx.author.voice.channel)
+    except discord.Forbidden:
+        await ctx.send("❌ У бота нет прав заходить в голосовой канал (нужны права Connect и Speak).")
+        return None
+    except discord.ClientException as e:
+        await ctx.send(f"❌ Не удалось подключиться: {e}")
+        return None
+    return player
+
+
+@bot.command(name="люб", aliases=["любимое", "избранное"])
+async def fav_cmd(ctx, *, arg: str = None):
+    if not arg:
+        favs = db.list_favorites(ctx.author.id)
+        if not favs:
+            await ctx.send("💖 Избранное пусто. Добавь трек: `!люб тело похудело`")
+            return
+        lines = [f"**Избранное ({len(favs)}/20)**"]
+        lines += [f"`{i}.` {f['title']} ({music.format_duration(f.get('duration') or 0)})" for i, f in enumerate(favs, 1)]
+        lines += ["\n`!любимое 3` — играть №3 · `!любимое 0` — играть все · `!любимое -3` — удалить №3"]
+        await ctx.send("\n".join(lines))
+        return
+    favs = db.list_favorites(ctx.author.id)
+    arg = arg.strip()
+    if arg.lstrip("-").isdigit():
+        n = int(arg)
+        if not favs:
+            await ctx.send("💖 Избранное пусто.")
+            return
+        if n == 0:
+            if len(favs) > 50:
+                favs = favs[:50]
+            player = await _require_voice(ctx)
+            if not player:
+                return
+            for f in favs:
+                await player.add_track(_favorite_to_track(f))
+            msg = await ctx.send(f"🎵 В очередь: **{len(favs)}** треков из избранного", view=make_player_view())
+            player.control_message = msg
+            return
+        if n < 0:
+            if db.remove_favorite(ctx.author.id, -n - 1):
+                await ctx.send(f"🗑 Удалён №{abs(n)} из избранного.")
+            else:
+                await ctx.send("❌ Нет такого номера.")
+            return
+        if 1 <= n <= len(favs):
+            player = await _require_voice(ctx)
+            if not player:
+                return
+            await player.add_track(_favorite_to_track(favs[n - 1]))
+            msg = await ctx.send(f"💖 Играет: **{favs[n - 1]['title']}**", view=make_player_view())
+            player.control_message = msg
+            return
+        await ctx.send("❌ Нет такого номера.")
+        return
+    track = await asyncio.to_thread(music.search_track, arg)
+    if not track:
+        await ctx.send(f"🔍 Не удалось найти: **{arg}**")
+        return
+    res = db.add_favorite(ctx.author.id, track)
+    if res == "ok":
+        favs = db.list_favorites(ctx.author.id)
+        await ctx.send(f"💖 Добавлено в избранное ({len(favs)}/20): **{track['title']}**")
+        await dt.unlock_achievement(ctx.guild, ctx.author.id, "fav_first", channel=ctx.channel)
+    elif res == "exists":
+        await ctx.send(f"💖 Уже в избранном: **{track['title']}**")
+    elif res == "limit":
+        await ctx.send("❌ Лимит 20 треков. Удали лишний: `!любимое -3`")
+    else:
+        await ctx.send("❌ Не удалось добавить.")
+
+
+@bot.command(name="плейлист", aliases=["playlist"])
+async def playlist_cmd(ctx):
+    favs = db.list_favorites(ctx.author.id)
+    if not favs:
+        await ctx.send("💖 Избранное пусто. Добавь трек: `!люб тело похудело`")
+        return
+    lines = [f"**Избранное ({len(favs)}/20)**"]
+    lines += [f"`{i}.` {f['title']} ({music.format_duration(f.get('duration') or 0)})" for i, f in enumerate(favs, 1)]
+    await ctx.send("\n".join(lines))
 
 
 # ── Ачивки и фокус ─────────────────────────────────────────────────────────
@@ -885,18 +1027,60 @@ async def focus_loop():
 
 
 async def music_loop():
+    """Проверка бездействия + живая карточка плеера (прогресс-бар раз в 5 сек)."""
     while True:
         try:
             for gid in list(music._players.keys()):
                 player = music._players[gid]
                 try:
                     await player.check_idle()
+                    await _refresh_player_card(player)
                 except Exception:
                     pass
             music.prune_players()
         except Exception:
             pass
-        await asyncio.sleep(30)
+        await asyncio.sleep(5)
+
+
+def _progress_bar(player) -> str:
+    total = int(player.current.get("duration") or 0) if player.current else 0
+    elapsed = player.progress_seconds()
+    seg = 16
+    filled = 0
+    if total > 0:
+        filled = max(0, min(seg, round(elapsed / total * seg)))
+    bar = "▬" * filled + "◔" + "▭" * max(0, seg - filled - 1) if filled < seg else "▬" * seg
+    pos = music.format_duration(min(elapsed, total or elapsed))
+    return f"{bar} {pos} / {music.format_duration(total)}"
+
+
+async def _refresh_player_card(player):
+    if not player.control_message:
+        return
+    try:
+        if player.current and player.is_playing:
+            track = player.current
+            embed = discord.Embed(
+                title="▶️ Сейчас играет",
+                description=f"🎵 **{track['title']}**\n👤 {track.get('uploader') or '—'}",
+                color=discord.Color.blue(),
+            )
+            if track.get("thumbnail"):
+                embed.set_thumbnail(url=track["thumbnail"])
+            embed.add_field(name="⏱ Прогресс", value=_progress_bar(player), inline=False)
+        else:
+            embed = discord.Embed(title="⏹ Плеер остановлен", color=discord.Color.dark_grey())
+        q = player.queue_list()
+        if q:
+            up = "\n".join(f"{i}. {t['title']}" for i, t in enumerate(q[:5], 1))
+            embed.add_field(name=f"Далее ({len(q)})", value=up, inline=False)
+        embed.set_footer(text=f"🔊 {int(player.volume * 100)}% | 🔁 {'вкл' if player.repeat else 'выкл'}")
+        await player.control_message.edit(embed=embed)
+    except discord.NotFound:
+        player.control_message = None
+    except (discord.HTTPException, discord.Forbidden):
+        pass
 
 
 VOICE_STARTED: dict = {}

@@ -214,6 +214,25 @@ def init_db():
                 done INTEGER DEFAULT 0,
                 channel_id INTEGER
             );
+
+            CREATE TABLE IF NOT EXISTS daily_streak (
+                user_id INTEGER PRIMARY KEY,
+                last_date TEXT,
+                streak INTEGER DEFAULT 0,
+                best INTEGER DEFAULT 0
+            );
+
+            CREATE TABLE IF NOT EXISTS favorite_tracks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                title TEXT NOT NULL,
+                url TEXT NOT NULL,
+                duration INTEGER DEFAULT 0,
+                thumb TEXT,
+                webpage_url TEXT,
+                added_at TEXT,
+                UNIQUE(user_id, url)
+            );
             """
         )
 
@@ -992,6 +1011,89 @@ def week_focus_stats(user_id: int) -> tuple[int, int]:
             (user_id, week_ago),
         ).fetchall()
         return len(rows), sum(r["minutes"] for r in rows)
+
+
+# ── Дневной бонус и серия ───────────────────────────────────────────────────
+
+def claim_daily(user_id: int, today: str, yesterday: str) -> dict:
+    """Начисляет дневной бонус и обновляет серию. Возвращает {reward, streak, best, first}."""
+    with _conn() as con:
+        row = con.execute(
+            "SELECT * FROM daily_streak WHERE user_id = ?", (user_id,)
+        ).fetchone()
+        cur_streak = row["streak"] if row else 0
+        last_date = row["last_date"] if row else None
+        if last_date == today:
+            return {"reward": 0, "streak": cur_streak, "best": row["best"] if row else 0, "first": False}
+        if last_date == yesterday:
+            cur_streak += 1
+        else:
+            cur_streak = 1
+        best = max(cur_streak, row["best"] if row else 0)
+        con.execute(
+            """
+            INSERT INTO daily_streak (user_id, last_date, streak, best) VALUES (?, ?, ?, ?)
+            ON CONFLICT(user_id) DO UPDATE SET
+                last_date = excluded.last_date, streak = excluded.streak, best = excluded.best
+            """,
+            (user_id, today, cur_streak, best),
+        )
+        reward = min(150, 50 + 10 * (cur_streak - 1))
+        return {"reward": reward, "streak": cur_streak, "best": best, "first": True}
+
+
+def get_daily_streak(user_id: int) -> dict:
+    with _conn() as con:
+        row = con.execute(
+            "SELECT * FROM daily_streak WHERE user_id = ?", (user_id,)
+        ).fetchone()
+        if not row:
+            return {"streak": 0, "best": 0, "last_date": None}
+        return dict(row)
+
+
+# ── Избранные треки ─────────────────────────────────────────────────────────
+
+def add_favorite(user_id: int, track: dict):
+    """Добавляет трек в избранное. Максимум 20. Возвращает "ok", "exists", "limit" или False."""
+    with _conn() as con:
+        count = con.execute(
+            "SELECT COUNT(*) AS c FROM favorite_tracks WHERE user_id = ?", (user_id,)
+        ).fetchone()["c"]
+        if count >= 20:
+            return "limit"
+        try:
+            cur = con.execute(
+                """
+                INSERT OR IGNORE INTO favorite_tracks
+                (user_id, title, url, duration, thumb, webpage_url, added_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (user_id, track["title"], track["url"], int(track.get("duration") or 0),
+                 track.get("thumbnail"), track.get("webpage_url") or "", _now()),
+            )
+            return "ok" if cur.rowcount > 0 else "exists"
+        except Exception:
+            return False
+
+
+def list_favorites(user_id: int) -> list[dict]:
+    with _conn() as con:
+        rows = con.execute(
+            "SELECT * FROM favorite_tracks WHERE user_id = ? ORDER BY id ASC", (user_id,)
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def remove_favorite(user_id: int, index: int) -> bool:
+    with _conn() as con:
+        rows = con.execute(
+            "SELECT id FROM favorite_tracks WHERE user_id = ? ORDER BY id ASC", (user_id,)
+        ).fetchall()
+        if not 0 <= index < len(rows):
+            return False
+        con.execute("DELETE FROM favorite_tracks WHERE id = ?", (rows[index]["id"],))
+        return True
 
 
 def get_guild_channel(guild_id: int, purpose: str) -> int | None:
