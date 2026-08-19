@@ -537,6 +537,78 @@ async def handle_interaction(interaction: discord.Interaction) -> bool:
             pass
         return True
 
+    # ── Кнопки дуэли ──
+    if cid in ("lumi:duel:accept", "lumi:duel:decline"):
+        import time as _t
+        import random
+        import discord_tools as _dt
+        st = _dt.DUEL_REQUESTS.get(interaction.user.id)
+        if not st:
+            try:
+                await interaction.response.send_message("❌ Нет активной дуэли для тебя: `!дуэль @юзер 50`", ephemeral=True)
+            except Exception:
+                pass
+            return True
+        if _t.time() - st["created"] > 90:
+            _dt.DUEL_REQUESTS.pop(interaction.user.id, None)
+            try:
+                await interaction.response.send_message("⏰ Запрос на дуэль устарел — создай новый.", ephemeral=True)
+            except Exception:
+                pass
+            return True
+        if cid == "lumi:duel:decline":
+            _dt.DUEL_REQUESTS.pop(interaction.user.id, None)
+            embed = discord.Embed(
+                title="⚔️ Дуэль отклонена",
+                description=f"**{st['target_name']}** отказался от дуэли с **{st['author_name']}**.",
+                color=0x17181A,
+            )
+            try:
+                await interaction.response.edit_message(embed=embed, view=None)
+            except Exception:
+                pass
+            return True
+        import database as _db
+        bet = st["bet"]
+        gid = st["guild_id"]
+        a_bal = _db.get_credits(gid, st["author_id"])
+        t_bal = _db.get_credits(gid, st["target_id"])
+        if a_bal < bet or t_bal < bet:
+            _dt.DUEL_REQUESTS.pop(interaction.user.id, None)
+            embed = discord.Embed(
+                title="⚔️ Дуэль не состоялась",
+                description=f"**{st['target_name']}** принял дуэль, но у кого-то не хватило кредитов.",
+                color=0x17181A,
+            )
+            try:
+                await interaction.response.edit_message(embed=embed, view=None)
+            except Exception:
+                pass
+            return True
+        _db.add_credits(gid, st["author_id"], -bet)
+        _db.add_credits(gid, st["target_id"], -bet)
+        winner = random.choice([st["author_id"], st["target_id"]])
+        winner_name = st["author_name"] if winner == st["author_id"] else st["target_name"]
+        _db.add_credits(gid, winner, bet * 2)
+        _dt.DUEL_REQUESTS.pop(interaction.user.id, None)
+        embed = discord.Embed(
+            title="⚔️ ДУЭЛЬ!",
+            description=(
+                f"**{st['author_name']}** против **{st['target_name']}** (ставка {bet})\n\n"
+                f"🏆 Победитель: **{winner_name}** — забирает **{bet * 2}** кредитов!"
+            ),
+            color=discord.Color.gold(),
+        )
+        try:
+            await interaction.response.edit_message(embed=embed, view=None)
+        except Exception:
+            pass
+        try:
+            await _dt.unlock_achievement(interaction.guild, winner, "duel_first", channel=None)
+        except Exception:
+            pass
+        return True
+
     # ── Кнопки блекджека ──
     if cid in ("lumi:bj:hit", "lumi:bj:stand"):
         try:

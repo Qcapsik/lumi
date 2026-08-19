@@ -1599,6 +1599,8 @@ async def setup_clan_server(
 
 BJ_SESSIONS: dict = {}
 
+DUEL_REQUESTS: dict = {}  # target_user_id -> состояние дуэли (ожидает подтверждения)
+
 _BJ_SUITS = ["♠", "♥", "♦", "♣"]
 
 

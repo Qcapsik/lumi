@@ -916,9 +916,16 @@ async def top_voice_cmd(ctx, limit: int = 10):
 
 # ── Дуэли ────────────────────────────────────────────────────────────────────
 
+def make_duel_view() -> discord.ui.View:
+    view = discord.ui.View()
+    view.add_item(discord.ui.Button(emoji="✅", label="Принять", custom_id="lumi:duel:accept", style=discord.ButtonStyle.success, row=0))
+    view.add_item(discord.ui.Button(emoji="❌", label="Отклонить", custom_id="lumi:duel:decline", style=discord.ButtonStyle.danger, row=0))
+    return view
+
+
 @bot.command(name="дуэль", aliases=["duel", "поединок"])
 async def duel_cmd(ctx, member: discord.Member = None, amount: int = 20):
-    import random
+    import time as _t
     if not member or member.bot:
         await ctx.send("❌ Укажи участника: `!дуэль @юзер 50`")
         return
@@ -928,20 +935,29 @@ async def duel_cmd(ctx, member: discord.Member = None, amount: int = 20):
     if amount < 5:
         await ctx.send("❌ Минимальная ставка 5 кредитов.")
         return
-    if (db.get_credits(ctx.guild.id, ctx.author.id) < amount
-            or db.get_credits(ctx.guild.id, member.id) < amount):
-        await ctx.send("❌ У одного из участников не хватает кредитов.")
+    if db.get_credits(ctx.guild.id, ctx.author.id) < amount:
+        await ctx.send("❌ У тебя не хватает кредитов.")
         return
-    db.add_credits(ctx.guild.id, ctx.author.id, -amount)
-    db.add_credits(ctx.guild.id, member.id, -amount)
-    winner = random.choice([ctx.author, member])
-    loser = member if winner == ctx.author else ctx.author
-    db.add_credits(ctx.guild.id, winner.id, amount * 2)
-    await ctx.send(
-        f"⚔️ **Дуэль!** {ctx.author.display_name} против {member.display_name} (ставка {amount})…\n"
-        f"🏆 Победитель: **{winner.display_name}** — забирает {amount * 2} кредитов!"
+    if member.id in dt.DUEL_REQUESTS:
+        await ctx.send(f"❌ Для **{member.display_name}** уже есть запрос на дуэль.")
+        return
+    state = {
+        "author_id": ctx.author.id,
+        "author_name": ctx.author.display_name,
+        "target_id": member.id,
+        "target_name": member.display_name,
+        "bet": amount,
+        "guild_id": ctx.guild.id,
+        "created": int(_t.time()),
+    }
+    dt.DUEL_REQUESTS[member.id] = state
+    embed = discord.Embed(
+        title="⚔️ Дуэль!",
+        description=f"**{ctx.author.display_name}** вызывает **{member.display_name}** на дуэль!\nСтавка: **{amount}** кредитов.",
+        color=0x17181A,
     )
-    await dt.unlock_achievement(ctx.guild, winner.id, "duel_first", channel=ctx.channel)
+    embed.set_footer(text=f"{member.display_name}, подтверди кнопкой. Действительно 90 секунд.")
+    await ctx.send(embed=embed, view=make_duel_view())
 
 
 # ── Блекджек ─────────────────────────────────────────────────────────────────
@@ -984,6 +1000,29 @@ async def bj_cmd(ctx, amount: int = 10):
     db.add_credits(ctx.guild.id, ctx.author.id, -bet)
     state = dt.bj_new(ctx.author.id, bet, ctx.guild.id)
     await ctx.send(embed=bj_embed(state), view=make_bj_view())
+
+
+@bot.command(name="кредиты", aliases=["выдать", "дайкредиты", "addcredits"])
+async def credits_cmd(ctx, member: discord.Member, amount: int = 0):
+    is_owner = ctx.author.id == ctx.guild.owner_id
+    is_admin = bool(ctx.author.guild_permissions.administrator)
+    if not (is_owner or is_admin):
+        await ctx.send("❌ Только владелец сервера или администратор может выдавать кредиты.")
+        return
+    if not member or member.bot:
+        await ctx.send("❌ Укажи участника: `!кредиты @юзер 500`")
+        return
+    if amount == 0:
+        await ctx.send("❌ Укажи сумму: `!кредиты @юзер 500`")
+        return
+    bal = db.get_credits(ctx.guild.id, member.id)
+    if amount < 0 and bal + amount < 0:
+        await ctx.send("❌ Баланс не может стать отрицательным.")
+        return
+    db.add_credits(ctx.guild.id, member.id, amount)
+    sign = "+" if amount > 0 else ""
+    await ctx.send(f"💳 {member.display_name}: **{bal}** → **{bal + amount}** ({sign}{amount} кредитов)")
+    db.log_action(ctx.guild.id, ctx.author.id, "credits_grant", {"member": member.id, "amount": amount}, f"баланс {bal} -> {bal+amount}", True)
 
 
 # ── Питомец-тамагочи ─────────────────────────────────────────────────────────
