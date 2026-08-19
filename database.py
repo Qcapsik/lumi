@@ -966,6 +966,15 @@ def get_voice_minutes(guild_id: int, member_id: int) -> int:
         return row["minutes"] if row else 0
 
 
+def top_voice_minutes(guild_id: int, limit: int = 10) -> list[dict]:
+    with _conn() as con:
+        rows = con.execute(
+            "SELECT member_id, minutes FROM voice_minutes WHERE guild_id = ? ORDER BY minutes DESC LIMIT ?",
+            (guild_id, limit),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
 # ── Фокус-сессии ───────────────────────────────────────────────────────────
 
 def add_focus_session(user_id: int, minutes: int, channel_id: int) -> int:
@@ -1011,6 +1020,21 @@ def week_focus_stats(user_id: int) -> tuple[int, int]:
             (user_id, week_ago),
         ).fetchall()
         return len(rows), sum(r["minutes"] for r in rows)
+
+
+# ── Клановая лотерея ───────────────────────────────────────────────────────
+
+def recent_speakers(guild_id: int, hours: int = 24) -> list[int]:
+    """Возвращает user_id, которые писали на сервере за последние N часов."""
+    import time as _t
+    from datetime import datetime, timedelta
+    since = (datetime.utcnow() - timedelta(hours=hours)).isoformat()
+    with _conn() as con:
+        rows = con.execute(
+            "SELECT DISTINCT user_id FROM chat_history WHERE guild_id = ? AND created_at >= ?",
+            (guild_id, since),
+        ).fetchall()
+        return [r["user_id"] for r in rows]
 
 
 # ── Дневной бонус и серия ───────────────────────────────────────────────────

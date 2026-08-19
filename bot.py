@@ -481,6 +481,8 @@ async def member_help(ctx):
             "`!люб <название>` — в избранное · `!любимое 3` — играть №3 · `!любимое 0` — весь плейлист · `!любимое -3` — удалить\n"
             "`!скип` `!стоп` `!очередь` `!громкость 50` `!повтор` `!выход`\n"
             "`!день` — ежедневный бонус (серия до 150 монет)\n"
+            "`!коин 50` — орёл/решка · `!кубик 50` — джекпот на 7 · `!рулетка 50 7` — число\n"
+            "`!топ_голос` — доска почёта голосовых\n"
             "`!фокус 25` — фокус-сессия с отчётом в ЛС\n`!ачивки` — твои награды\n\n"
             "Владелец может также просто писать: **Луми, …** — она всё сделает сама."
         ),
@@ -695,8 +697,8 @@ async def play_cmd(ctx, *, query: str = None):
         await ctx.send("🔍 Не удалось найти трек. Попробуй иначе: `!плей исполнитель - название`")
         return
     result = await player.add_track(track)
-    embed = discord.Embed(title=result, description=f"🎵 **{track['title']}**\n⏱ {music.format_duration(track['duration'])}", color=discord.Color.blue())
-    msg = await ctx.send(embed=embed, view=make_player_view())
+    embed = discord.Embed(title=result, description=f"🎵 **{track['title']}**\n⏱ {music.format_duration(track['duration'])}", color=0x17181A)
+    msg = await ctx.send(embed=embed, view=make_player_view(player))
     player.control_message = msg
 
 
@@ -794,6 +796,94 @@ async def daily_cmd(ctx):
     await ctx.send(embed=embed)
     if res["streak"] >= 7:
         await dt.unlock_achievement(ctx.guild, ctx.author.id, "daily_7", channel=ctx.channel)
+
+
+# ── Казино и мини-игры ──────────────────────────────────────────────────────
+
+def _bet_check(ctx, amount: str) -> int | None:
+    try:
+        bet = int(amount)
+    except (TypeError, ValueError):
+        return None
+    if bet < 5:
+        return None
+    balance = db.get_credits(ctx.guild.id, ctx.author.id)
+    if balance < bet:
+        return None
+    return bet
+
+
+@bot.command(name="коин", aliases=["coin", "орел", "орёл"])
+async def coin_cmd(ctx, amount: int = 10):
+    bet = _bet_check(ctx, amount)
+    if bet is None:
+        await ctx.send("❌ Минимальная ставка 5, и у тебя должно хватать кредитов.")
+        return
+    import random
+    win = random.random() < 0.5
+    if win:
+        db.add_credits(ctx.guild.id, ctx.author.id, bet)
+        await ctx.send(f"🪙 **Орёл!** Ты выиграл **+{bet}**! Баланс: {db.get_credits(ctx.guild.id, ctx.author.id)}")
+    else:
+        db.add_credits(ctx.guild.id, ctx.author.id, -bet)
+        await ctx.send(f"🪙 **Решка.** Проигрыш **-{bet}**. Баланс: {db.get_credits(ctx.guild.id, ctx.author.id)}")
+
+
+@bot.command(name="кубик", aliases=["dice", "кость"])
+async def dice_cmd(ctx, amount: int = 10):
+    bet = _bet_check(ctx, amount)
+    if bet is None:
+        await ctx.send("❌ Минимальная ставка 5, и у тебя должно хватать кредитов.")
+        return
+    import random
+    d1, d2 = random.randint(1, 6), random.randint(1, 6)
+    total = d1 + d2
+    if total == 7:
+        db.add_credits(ctx.guild.id, ctx.author.id, bet * 4)
+        await ctx.send(f"🎲 **{d1} + {d2} = 7!** Джекпот! +**{bet * 4}**! Баланс: {db.get_credits(ctx.guild.id, ctx.author.id)}")
+    else:
+        db.add_credits(ctx.guild.id, ctx.author.id, -bet)
+        await ctx.send(f"🎲 **{d1} + {d2} = {total}** — не 7. Проигрыш **-{bet}**. Баланс: {db.get_credits(ctx.guild.id, ctx.author.id)}")
+
+
+@bot.command(name="рулетка", aliases=["roulette", "wheel"])
+async def roulette_cmd(ctx, amount: int = 10, number: int = None):
+    bet = _bet_check(ctx, amount)
+    if bet is None:
+        await ctx.send("❌ Минимальная ставка 5, и у тебя должно хватать кредитов.")
+        return
+    if number is None or not 1 <= number <= 36:
+        await ctx.send("🎰 Укажи число от 1 до 36: `!рулетка 100 7`")
+        return
+    import random
+    win_num = random.randint(1, 36)
+    if win_num == number:
+        db.add_credits(ctx.guild.id, ctx.author.id, bet * 35)
+        await ctx.send(f"🎰 **{win_num}!** Точное попадание! +**{bet * 35}**! Баланс: {db.get_credits(ctx.guild.id, ctx.author.id)}")
+    else:
+        db.add_credits(ctx.guild.id, ctx.author.id, -bet)
+        await ctx.send(f"🎰 Выпало **{win_num}** — не {number}. Проигрыш **-{bet}**. Баланс: {db.get_credits(ctx.guild.id, ctx.author.id)}")
+
+
+@bot.command(name="топ_голос", aliases=["topvoice", "топголос"])
+async def top_voice_cmd(ctx, limit: int = 10):
+    rows = db.top_voice_minutes(ctx.guild.id, min(max(limit, 1), 25))
+    if not rows:
+        await ctx.send("🎧 Пока никто не сидел в голосовых.")
+        return
+    lines = []
+    medals = ["🥇", "🥈", "🥉"]
+    for i, r in enumerate(rows):
+        member = ctx.guild.get_member(r["member_id"])
+        name = member.display_name if member else f"id {r['member_id']}"
+        medal = medals[i] if i < 3 else f"`{i + 1}.`"
+        minutes = r["minutes"]
+        if minutes >= 600:
+            t = f"{minutes // 60} ч {minutes % 60} мин"
+        else:
+            t = f"{minutes} мин"
+        lines.append(f"{medal} **{name}** — {t}")
+    await ctx.send("🎧 **Доска почёта голосовых**\n" + "\n".join(lines))
 
 
 # ── Избранные треки ────────────────────────────────────────────────────────
@@ -1062,6 +1152,37 @@ async def music_loop():
         await asyncio.sleep(5)
 
 
+async def lottery_loop():
+    """Клановая лотерея: раз в час случайный активный участник получает 100 кредитов."""
+    while True:
+        try:
+            await asyncio.sleep(3600)
+            for guild in bot.guilds:
+                if not guild.system_channel:
+                    continue
+                try:
+                    pool = db.recent_speakers(guild.id, 24)
+                    members = [uid for uid in pool if (m := guild.get_member(uid)) and not m.bot]
+                    if len(members) < 2:
+                        continue
+                    import random
+                    winner_id = random.choice(members)
+                    member = guild.get_member(winner_id)
+                    if not member:
+                        continue
+                    db.add_credits(guild.id, winner_id, 100)
+                    embed = discord.Embed(
+                        title="🎰 Клановая лотерея!",
+                        description=f"Победитель: **{member.display_name}** {member.mention}\n+**100** кредитов!",
+                        color=discord.Color.gold(),
+                    )
+                    await guild.system_channel.send(embed=embed)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+
 def _progress_bar(player) -> str:
     total = int(player.current.get("duration") or 0) if player.current else 0
     elapsed = player.progress_seconds()
@@ -1083,13 +1204,13 @@ async def _refresh_player_card(player):
             embed = discord.Embed(
                 title="▶️ Сейчас играет",
                 description=f"🎵 **{track['title']}**\n👤 {track.get('uploader') or '—'}",
-                color=discord.Color.blue(),
+                color=0x17181A,
             )
             if track.get("thumbnail"):
                 embed.set_thumbnail(url=track["thumbnail"])
             embed.add_field(name="⏱ Прогресс", value=_progress_bar(player), inline=False)
         else:
-            embed = discord.Embed(title="⏹ Плеер остановлен", color=discord.Color.dark_grey())
+            embed = discord.Embed(title="⏹ Плеер остановлен", color=0x17181A)
         q = player.queue_list()
         if q:
             up = "\n".join(f"{i}. {t['title']}" for i, t in enumerate(q[:5], 1))
@@ -1140,6 +1261,7 @@ async def on_ready():
     bot.loop.create_task(birthday_loop())
     bot.loop.create_task(focus_loop())
     bot.loop.create_task(music_loop())
+    bot.loop.create_task(lottery_loop())
     bot.loop.create_task(voice_flush_loop())
     print(f"🔥 Луми запущена | серверов: {len(bot.guilds)} | инструментов: {len(tools_map)}")
 
@@ -1177,7 +1299,11 @@ async def on_member_join(member):
                 description=f"{member.mention}\n\n{rules}",
                 color=discord.Color.green(),
             )
-            await channel.send(embed=embed)
+            card = await dt.render_welcome_card(member, rules)
+            if card:
+                await channel.send(embed=embed, file=discord.File(card, filename="welcome.png"))
+            else:
+                await channel.send(embed=embed)
         if role:
             await member.add_roles(role, reason="Приветствие новичка")
     except (discord.Forbidden, discord.HTTPException):

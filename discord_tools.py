@@ -1690,6 +1690,62 @@ def _rounded_avatar(img, size: int):
     return out
 
 
+async def render_welcome_card(member: discord.Member, rules_text: str = "") -> io.BytesIO | None:
+    """Рисует приветственную карточку 800x250 (PNG). Возвращает BytesIO или None."""
+    try:
+        from PIL import Image, ImageDraw, ImageFilter
+
+        width, height = 800, 250
+        base = Image.new("RGB", (width, height), (18, 20, 28))
+        draw = ImageDraw.Draw(base)
+        for y in range(height):
+            t = y / height
+            r = int(18 + (52 - 18) * t)
+            g = int(20 + (38 - 20) * t)
+            b = int(28 + (66 - 28) * t)
+            draw.line([(0, y), (width, y)], fill=(r, g, b))
+        glow = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+        glow_draw = ImageDraw.Draw(glow)
+        glow_draw.ellipse((width - 280, -160, width + 80, 200), fill=(255, 215, 0, 36))
+        glow_draw.ellipse((-160, 120, 120, 400), fill=(88, 101, 242, 40))
+        glow = glow.filter(ImageFilter.GaussianBlur(50))
+        base = Image.alpha_composite(base.convert("RGBA"), glow).convert("RGB")
+        draw = ImageDraw.Draw(base)
+
+        avatar = None
+        try:
+            url = member.display_avatar.with_size(128).url
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=8)) as resp:
+                    if resp.status == 200:
+                        avatar = Image.open(io.BytesIO(await resp.read())).convert("RGBA")
+        except Exception:
+            avatar = None
+        if avatar is None:
+            avatar = Image.new("RGBA", (128, 128), (90, 95, 120))
+            md = ImageDraw.Draw(avatar)
+            md.text((64, 64), (member.display_name or "?")[:1].upper(), fill=(255, 255, 255), font=_load_font(52, True), anchor="mm")
+        avatar = _rounded_avatar(avatar, 120)
+        base.paste(avatar, (46, (height - 120) // 2), avatar)
+
+        draw.text((206, 44), "ДОБРО ПОЖАЛОВАТЬ!", fill=(255, 215, 0), font=_load_font(26, True))
+        name = (member.display_name or member.name)[:28]
+        draw.text((206, 84), name, fill=(255, 255, 255), font=_load_font(34, True))
+        drawn = (rules_text or "").strip()
+        if drawn:
+            if len(drawn) > 66:
+                drawn = drawn[:66] + "..."
+            draw.text((206, 138), drawn, fill=(200, 205, 220), font=_load_font(15))
+        draw.text((206, 176), f"Мы рады тебя видеть на сервере!", fill=(150, 158, 180), font=_load_font(14))
+
+        buf = io.BytesIO()
+        base.save(buf, format="PNG")
+        buf.seek(0)
+        return buf
+    except Exception:
+        return None
+
+
 async def render_profile_card(member: discord.Member) -> io.BytesIO | None:
     """Рисует карточку профиля 600x300 (PNG). Возвращает BytesIO или None при ошибке."""
     try:
