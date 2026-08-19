@@ -800,6 +800,34 @@ async def daily_cmd(ctx):
 
 # ── Казино и мини-игры ──────────────────────────────────────────────────────
 
+def casino_view() -> discord.ui.View:
+    view = discord.ui.View()
+    view.add_item(discord.ui.Button(emoji="🪙", label="Орёл/Решка", custom_id="lumi:casino:coin", style=discord.ButtonStyle.primary, row=0))
+    view.add_item(discord.ui.Button(emoji="🎲", label="Кубик", custom_id="lumi:casino:dice", style=discord.ButtonStyle.success, row=0))
+    view.add_item(discord.ui.Button(emoji="🎰", label="Рулетка", custom_id="lumi:casino:roulette", style=discord.ButtonStyle.danger, row=0))
+    return view
+
+
+CASINO_RULES = {
+    "coin": ("🪙 Орёл/Решка", "Ставка от 5 кредитов. Шанс 50/50: орёл — удваиваешь, решка — теряешь.\n\nКоманда: `!коин <ставка>`"),
+    "dice": ("🎲 Кубик", "Бросаются два кубика (2–12). Сумма **7** — джекпот: выигрыш ×5 (+4 ставки). Любая другая — проигрыш.\n\nКоманда: `!кубик <ставка>`"),
+    "roulette": ("🎰 Рулетка", "Выбираешь число от 1 до 36. Сумма — точное попадание: выигрыш ×36 (+35 ставок).\n\nКоманда: `!рулетка <ставка> <число>`"),
+}
+
+
+@bot.command(name="казино", aliases=["casino"])
+async def casino_cmd(ctx):
+    embed = discord.Embed(
+        title="🎰 Казино Луми",
+        description="Выбери игру кнопками ниже — покажу правила.",
+        color=0x17181A,
+    )
+    embed.add_field(name="🪙 Орёл/Решка", value="Шанс 50/50, выигрыш ×2", inline=False)
+    embed.add_field(name="🎲 Кубик", value="Два кубика, сумма 7 → джекпот ×5", inline=False)
+    embed.add_field(name="🎰 Рулетка", value="Угадай число 1–36 → выигрыш ×36", inline=False)
+    embed.set_footer(text="Ставка минимум 5 кредитов. Удачи!")
+    await ctx.send(embed=embed, view=casino_view())
+
 def _bet_check(ctx, amount: str) -> int | None:
     try:
         bet = int(amount)

@@ -537,6 +537,29 @@ async def handle_interaction(interaction: discord.Interaction) -> bool:
             pass
         return True
 
+    # ── Кнопки казино ──
+    if cid.startswith("lumi:casino:"):
+        game = cid.split(":")[2]
+        cards = {
+            "coin": ("🪙 Орёл/Решка — правила",
+                     "Ставка от 5 кредитов. Шанс 50/50: орёл — удваиваешь, решка — теряешь.\n\nКоманда: `!коин <ставка>`"),
+            "dice": ("🎲 Кубик — правила",
+                     "Бросаются два кубика (2–12). Сумма **7** — джекпот: выигрыш ×5 (+4 ставки). Любая другая — проигрыш.\n\nКоманда: `!кубик <ставка>`"),
+            "roulette": ("🎰 Рулетка — правила",
+                         "Выбираешь число от 1 до 36. Точное попадание — выигрыш ×36 (+35 ставок).\n\nКоманда: `!рулетка <ставка> <число>`"),
+        }
+        try:
+            card = cards.get(game)
+            if card:
+                embed = discord.Embed(title=card[0], description=card[1], color=0x17181A)
+                await interaction.response.send_message(embed=embed, ephemeral=True)
+            else:
+                await interaction.response.send_message("❌ Неизвестная игра.", ephemeral=True)
+        except Exception:
+            if not interaction.response.is_done():
+                await interaction.response.send_message("❌ Ошибка.", ephemeral=True)
+        return True
+
     # ── Кнопки музыкального плеера ──
     if cid.startswith("lumi:player:"):
         action = cid.split(":")[2]
