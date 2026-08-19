@@ -650,18 +650,25 @@ async def currency_cmd(ctx, base: str = "RUB"):
 
 # ── Музыка ─────────────────────────────────────────────────────────────────
 
-def make_player_view() -> discord.ui.View:
+def make_player_view(player=None) -> discord.ui.View:
     view = discord.ui.View()
-    buttons = [
-        ("⏭️", "lumi:player:skip", discord.ButtonStyle.secondary),
+    play_emoji = "⏸" if (player and player.is_paused) else "▶️"
+    row0 = [
+        ("⏮️", "lumi:player:prev", discord.ButtonStyle.primary),
+        (play_emoji, "lumi:player:pause", discord.ButtonStyle.success),
+        ("⏭️", "lumi:player:skip", discord.ButtonStyle.primary),
+        ("🔁", "lumi:player:repeat", discord.ButtonStyle.success),
         ("⏹️", "lumi:player:stop", discord.ButtonStyle.danger),
-        ("🔁", "lumi:player:repeat", discord.ButtonStyle.secondary),
+    ]
+    row1 = [
         ("🔉", "lumi:player:voldown", discord.ButtonStyle.secondary),
         ("🔊", "lumi:player:volup", discord.ButtonStyle.secondary),
         ("👋", "lumi:player:leave", discord.ButtonStyle.secondary),
     ]
-    for emoji, cid, style in buttons:
-        view.add_item(discord.ui.Button(emoji=emoji, custom_id=cid, style=style))
+    for i, (emoji, cid, style) in enumerate(row0):
+        view.add_item(discord.ui.Button(emoji=emoji, custom_id=cid, style=style, row=0))
+    for i, (emoji, cid, style) in enumerate(row1):
+        view.add_item(discord.ui.Button(emoji=emoji, custom_id=cid, style=style, row=1))
     return view
 
 
@@ -742,6 +749,18 @@ async def repeat_cmd(ctx):
 async def leave_cmd(ctx):
     player = music.get_player(ctx.guild.id, bot)
     await ctx.send(await player.leave())
+
+
+@bot.command(name="пауза", aliases=["pause", "продолжить", "resume"])
+async def pause_cmd(ctx):
+    player = music.get_player(ctx.guild.id, bot)
+    await ctx.send(player.toggle_pause())
+
+
+@bot.command(name="назад", aliases=["prev", "предыдущий"])
+async def prev_cmd(ctx):
+    player = music.get_player(ctx.guild.id, bot)
+    await ctx.send(await player.prev())
 
 
 # ── Дневной бонус ──────────────────────────────────────────────────────────
@@ -1076,7 +1095,7 @@ async def _refresh_player_card(player):
             up = "\n".join(f"{i}. {t['title']}" for i, t in enumerate(q[:5], 1))
             embed.add_field(name=f"Далее ({len(q)})", value=up, inline=False)
         embed.set_footer(text=f"🔊 {int(player.volume * 100)}% | 🔁 {'вкл' if player.repeat else 'выкл'}")
-        await player.control_message.edit(embed=embed)
+        await player.control_message.edit(embed=embed, view=make_player_view(player))
     except discord.NotFound:
         player.control_message = None
     except (discord.HTTPException, discord.Forbidden):

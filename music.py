@@ -130,6 +130,9 @@ class MusicPlayer:
         self._playing = False
         self.started_at = 0.0
         self.control_message = None
+        self.history: list[dict] = []
+        self.is_paused = False
+        self._paused_elapsed = 0
 
     @property
     def is_playing(self) -> bool:
@@ -158,11 +161,23 @@ class MusicPlayer:
             self._playing = False
             self.current = None
             self.started_at = 0.0
+            self.is_paused = False
             self.last_activity = time.time()
             return
+        if self.current and self.is_paused:
+            if self.voice_client and self.voice_client.is_paused():
+                self.voice_client.resume()
+        if self.current and not self.is_paused:
+            last = self.history[-1] if self.history else None
+            if not last or last.get("id") != self.current.get("id"):
+                self.history.append(self.current)
+                if len(self.history) > 12:
+                    self.history.pop(0)
         track = self.queue.pop(0)
         self.current = track
         self._playing = True
+        self.is_paused = False
+        self.started_at = time.time()
         self.last_activity = time.time()
         if not self.voice_client or not self.voice_client.is_connected():
             self._playing = False
@@ -219,7 +234,34 @@ class MusicPlayer:
     def progress_seconds(self) -> int:
         if not self._playing or not self.current:
             return 0
+        if self.is_paused:
+            return self._paused_elapsed
         return int(time.time() - self.started_at)
+
+    def toggle_pause(self) -> str:
+        if not self.current or not self.voice_client:
+            return "❌ Ничего не играет."
+        if self.voice_client.is_paused():
+            self.voice_client.resume()
+            self.started_at = time.time() - self._paused_elapsed
+            self.is_paused = False
+            return "▶️ Продолжаем"
+        self.voice_client.pause()
+        self._paused_elapsed = max(0, int(time.time() - self.started_at))
+        self.is_paused = True
+        return f"⏸ Пауза · {self.current.get('title', '')[:40]}"
+
+    async def prev(self) -> str:
+        if not self.history:
+            return "❌ Нет предыдущих треков."
+        track = self.history.pop()
+        self.queue.insert(0, track)
+        if self.voice_client and (self.voice_client.is_playing() or self.voice_client.is_paused()):
+            self.voice_client.stop()
+        await self._play_next()
+        if self.current:
+            return f"⏮️ Сейчас: **{self.current['title']}**"
+        return "⏮️ Очередь пуста."
 
     async def skip(self) -> str:
         if self.voice_client and self.voice_client.is_playing():
@@ -234,7 +276,8 @@ class MusicPlayer:
         self.queue.clear()
         self.current = None
         self.started_at = 0.0
-        if self.voice_client and self.voice_client.is_playing():
+        self.is_paused = False
+        if self.voice_client and (self.voice_client.is_playing() or self.voice_client.is_paused()):
             self.voice_client.stop()
         return "⏹ Остановлено, очередь очищена."
 
@@ -248,8 +291,9 @@ class MusicPlayer:
         self.queue.clear()
         self.current = None
         self.started_at = 0.0
+        self.is_paused = False
         if self.voice_client:
-            if self.voice_client.is_playing():
+            if self.voice_client.is_playing() or self.voice_client.is_paused():
                 self.voice_client.stop()
             await self.voice_client.disconnect(force=False)
         self.voice_client = None

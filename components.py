@@ -545,6 +545,10 @@ async def handle_interaction(interaction: discord.Interaction) -> bool:
             player = music.get_player(interaction.guild.id, _bot)
             if action == "skip":
                 out = await player.skip()
+            elif action == "pause":
+                out = player.toggle_pause()
+            elif action == "prev":
+                out = await player.prev()
             elif action == "stop":
                 out = await player.stop()
             elif action == "repeat":
