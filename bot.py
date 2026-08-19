@@ -497,7 +497,9 @@ async def profile_cmd(ctx, *, member=None):
     if not target:
         await ctx.send("❌ Участник не найден.")
         return
-    img = await dt.render_profile_card(target)
+    frame_name = db.get_active_frame(target.guild.id, target.id)
+    color = FRAMES.get(frame_name, (None,))[1] if frame_name in FRAMES else None
+    img = await dt.render_profile_card(target, frame_color=color)
     if img:
         embed = discord.Embed(color=discord.Color.gold())
         embed.set_image(url="attachment://profile.png")
@@ -1025,6 +1027,92 @@ async def credits_cmd(ctx, member: discord.Member, amount: int = 0):
     db.log_action(ctx.guild.id, ctx.author.id, "credits_grant", {"member": member.id, "amount": amount}, f"баланс {bal} -> {bal+amount}", True)
 
 
+# ── Рамки профиля ────────────────────────────────────────────────────────────
+
+FRAMES = {
+    "default": (0, None, "Стандартная — без рамки"),
+    "gold": (500, (255, 215, 0), "Золотая"),
+    "sunset": (800, (255, 120, 50), "Закат"),
+    "neon": (1200, (0, 229, 255), "Неон"),
+    "legendary": (3000, (255, 45, 85), "Легендарная"),
+}
+
+
+@bot.command(name="рамки", aliases=["frames"])
+async def frames_cmd(ctx):
+    owned = set(db.list_owned_frames(ctx.guild.id, ctx.author.id))
+    active = db.get_active_frame(ctx.guild.id, ctx.author.id)
+    lines = ["**Рамки профиля**", "Купи: `!купить_рамку <название>` · Включить: `!рамка <название>`"]
+    for name, (price, _, label) in FRAMES.items():
+        if name == "default":
+            continue
+        status = "✅ куплена" if name in owned else f"💳 {price} ₭"
+        act = " · **АКТИВНА**" if name == active else ""
+        lines.append(f"{label} `{name}` — {status}{act}")
+    await ctx.send("\n".join(lines))
+
+
+@bot.command(name="купить_рамку", aliases=["buyframe"])
+async def buy_frame_cmd(ctx, name: str = None):
+    if not name or name not in FRAMES or name == "default":
+        await ctx.send("❌ `!купить_рамку gold` — варианты: gold, sunset, neon, legendary")
+        return
+    price, _, label = FRAMES[name]
+    if db.owns_frame(ctx.guild.id, ctx.author.id, name):
+        await ctx.send(f"❌ Рамка **{label}** уже куплена.")
+        return
+    if db.get_credits(ctx.guild.id, ctx.author.id) < price:
+        await ctx.send(f"❌ Не хватает кредитов: нужно {price} ₭.")
+        return
+    db.add_credits(ctx.guild.id, ctx.author.id, -price)
+    db.buy_frame(ctx.guild.id, ctx.author.id, name)
+    db.set_active_frame(ctx.guild.id, ctx.author.id, name)
+    await ctx.send(f"✅ Куплена и включена рамка **{label}** (-{price} ₭)! Смотри: `!профиль`")
+
+
+@bot.command(name="рамка", aliases=["frame"])
+async def frame_cmd(ctx, name: str = None):
+    if not name or name not in FRAMES or name == "default":
+        await ctx.send("❌ `!рамка neon` — варианты: gold, sunset, neon, legendary")
+        return
+    if name == "default" or db.owns_frame(ctx.guild.id, ctx.author.id, name):
+        db.set_active_frame(ctx.guild.id, ctx.author.id, name)
+        label = "Стандартная (без рамки)" if name == "default" else FRAMES[name][2]
+        await ctx.send(f"🖼 Включена рамка **{label}**!")
+    else:
+        await ctx.send("❌ Сначала купи: `!купить_рамку " + name + "`")
+
+
+# ── !шанс ────────────────────────────────────────────────────────────────────
+
+@bot.command(name="шанс", aliases=["chance", "вероятность"])
+async def chance_cmd(ctx, *, question: str = None):
+    import random
+    if not question:
+        await ctx.send("❌ Спроси что-нибудь: `!шанс что я выиграю в рулетку`")
+        return
+    pct = random.randint(0, 100)
+    if pct >= 90:
+        verdict = "Почти наверняка!"
+    elif pct >= 70:
+        verdict = "Скорее да."
+    elif pct >= 40:
+        verdict = "50 на 50."
+    elif pct >= 10:
+        verdict = "Скорее нет."
+    else:
+        verdict = "Даже не надейся."
+    seg = 12
+    filled = round(pct / 100 * seg)
+    bar = "▓" * filled + "░" * (seg - filled)
+    embed = discord.Embed(
+        title=f"🎲 {question[:120]}",
+        description=f"**Шанс: {pct}%**\n{bar}\n\n{verdict}",
+        color=0x17181A,
+    )
+    await ctx.send(embed=embed)
+
+
 # ── Карточка сервера, QR, кастомные команды ─────────────────────────────────
 
 def _is_owner_or_admin(ctx) -> bool:
@@ -1467,6 +1555,22 @@ async def music_loop():
         await asyncio.sleep(5)
 
 
+async def status_loop():
+    """Обновляет статус бота: играет для N серверов."""
+    while True:
+        try:
+            n = len(bot.guilds)
+            await bot.change_presence(
+                activity=discord.Activity(
+                    type=discord.ActivityType.listening,
+                    name=f"музыку для {n} серверов 🎵",
+                )
+            )
+        except Exception:
+            pass
+        await asyncio.sleep(600)
+
+
 async def lottery_loop():
     """Клановая лотерея: раз в час случайный активный участник получает 100 кредитов."""
     while True:
@@ -1634,6 +1738,7 @@ async def on_ready():
     bot.loop.create_task(lottery_loop())
     bot.loop.create_task(weekly_digest_loop())
     bot.loop.create_task(voice_flush_loop())
+    bot.loop.create_task(status_loop())
     print(f"🔥 Луми запущена | серверов: {len(bot.guilds)} | инструментов: {len(tools_map)}")
 
 

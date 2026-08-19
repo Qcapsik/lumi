@@ -1896,8 +1896,8 @@ async def render_welcome_card(member: discord.Member, rules_text: str = "") -> i
         return None
 
 
-async def render_profile_card(member: discord.Member) -> io.BytesIO | None:
-    """Рисует карточку профиля 600x300 (PNG). Возвращает BytesIO или None при ошибке."""
+async def render_profile_card(member: discord.Member, frame_color: tuple = None) -> io.BytesIO | None:
+    """Рисует карточку профиля 600x300 (PNG). frame_color — RGB рамки аватара (None — без рамки)."""
     try:
         from PIL import Image, ImageDraw, ImageFilter
 
@@ -1942,6 +1942,10 @@ async def render_profile_card(member: discord.Member) -> io.BytesIO | None:
             md.text((64, 58), (member.display_name or "?")[:1].upper(), fill=(255, 255, 255), font=_load_font(48, True), anchor="mm")
         avatar = _rounded_avatar(avatar, 128)
         base.paste(avatar, (36, (height - 128) // 2), avatar)
+        if frame_color:
+            x0, y0 = 36 - 7, (height - 128) // 2 - 7
+            x1, y1 = x0 + 128 + 14, y0 + 128 + 14
+            draw.rounded_rectangle((x0, y0, x1, y1), radius=24, outline=frame_color, width=7)
 
         font_big = _load_font(34, True)
         font_mid = _load_font(16, bold=True)

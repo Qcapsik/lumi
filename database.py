@@ -253,6 +253,20 @@ def init_db():
                 created_at TEXT,
                 PRIMARY KEY (guild_id, name)
             );
+
+            CREATE TABLE IF NOT EXISTS profile_frames (
+                guild_id INTEGER NOT NULL,
+                member_id INTEGER NOT NULL,
+                active TEXT DEFAULT 'default',
+                PRIMARY KEY (guild_id, member_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS owned_frames (
+                guild_id INTEGER NOT NULL,
+                member_id INTEGER NOT NULL,
+                frame TEXT NOT NULL,
+                PRIMARY KEY (guild_id, member_id, frame)
+            );
             """
         )
 
@@ -1040,6 +1054,58 @@ def week_focus_stats(user_id: int) -> tuple[int, int]:
             (user_id, week_ago),
         ).fetchall()
         return len(rows), sum(r["minutes"] for r in rows)
+
+
+# ── Рамки профиля ───────────────────────────────────────────────────────────
+
+def owns_frame(guild_id: int, member_id: int, frame: str) -> bool:
+    with _conn() as con:
+        row = con.execute(
+            "SELECT 1 FROM owned_frames WHERE guild_id = ? AND member_id = ? AND frame = ?",
+            (guild_id, member_id, frame),
+        ).fetchone()
+        return row is not None
+
+
+def buy_frame(guild_id: int, member_id: int, frame: str) -> bool:
+    with _conn() as con:
+        try:
+            con.execute(
+                "INSERT INTO owned_frames (guild_id, member_id, frame) VALUES (?, ?, ?)",
+                (guild_id, member_id, frame),
+            )
+            return True
+        except sqlite3.IntegrityError:
+            return False
+
+
+def set_active_frame(guild_id: int, member_id: int, frame: str):
+    with _conn() as con:
+        con.execute(
+            """
+            INSERT INTO profile_frames (guild_id, member_id, active) VALUES (?, ?, ?)
+            ON CONFLICT(guild_id, member_id) DO UPDATE SET active = excluded.active
+            """,
+            (guild_id, member_id, frame),
+        )
+
+
+def get_active_frame(guild_id: int, member_id: int) -> str:
+    with _conn() as con:
+        row = con.execute(
+            "SELECT active FROM profile_frames WHERE guild_id = ? AND member_id = ?",
+            (guild_id, member_id),
+        ).fetchone()
+        return row["active"] if row else "default"
+
+
+def list_owned_frames(guild_id: int, member_id: int) -> list[str]:
+    with _conn() as con:
+        rows = con.execute(
+            "SELECT frame FROM owned_frames WHERE guild_id = ? AND member_id = ?",
+            (guild_id, member_id),
+        ).fetchall()
+        return [r["frame"] for r in rows]
 
 
 # ── Кастомные команды сервера ───────────────────────────────────────────────
