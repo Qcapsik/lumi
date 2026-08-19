@@ -244,6 +244,15 @@ def init_db():
                 last_feed INTEGER DEFAULT 0,
                 created_at TEXT
             );
+
+            CREATE TABLE IF NOT EXISTS custom_commands (
+                guild_id INTEGER NOT NULL,
+                name TEXT NOT NULL,
+                response TEXT NOT NULL,
+                created_by INTEGER,
+                created_at TEXT,
+                PRIMARY KEY (guild_id, name)
+            );
             """
         )
 
@@ -1031,6 +1040,50 @@ def week_focus_stats(user_id: int) -> tuple[int, int]:
             (user_id, week_ago),
         ).fetchall()
         return len(rows), sum(r["minutes"] for r in rows)
+
+
+# ── Кастомные команды сервера ───────────────────────────────────────────────
+
+def add_custom_command(guild_id: int, name: str, response: str, created_by: int) -> bool:
+    with _conn() as con:
+        try:
+            con.execute(
+                """
+                INSERT INTO custom_commands (guild_id, name, response, created_by, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (guild_id, name.lower(), response.strip()[:1500], created_by, _now()),
+            )
+            return True
+        except sqlite3.IntegrityError:
+            return False
+
+
+def get_custom_command(guild_id: int, name: str) -> dict | None:
+    with _conn() as con:
+        row = con.execute(
+            "SELECT * FROM custom_commands WHERE guild_id = ? AND name = ?",
+            (guild_id, name.lower()),
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def list_custom_commands(guild_id: int) -> list[dict]:
+    with _conn() as con:
+        rows = con.execute(
+            "SELECT name, response, created_at FROM custom_commands WHERE guild_id = ? ORDER BY name ASC",
+            (guild_id,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def remove_custom_command(guild_id: int, name: str) -> bool:
+    with _conn() as con:
+        cur = con.execute(
+            "DELETE FROM custom_commands WHERE guild_id = ? AND name = ?",
+            (guild_id, name.lower()),
+        )
+        return cur.rowcount > 0
 
 
 # ── Клановая лотерея ───────────────────────────────────────────────────────

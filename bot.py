@@ -1025,6 +1025,93 @@ async def credits_cmd(ctx, member: discord.Member, amount: int = 0):
     db.log_action(ctx.guild.id, ctx.author.id, "credits_grant", {"member": member.id, "amount": amount}, f"баланс {bal} -> {bal+amount}", True)
 
 
+# ── Карточка сервера, QR, кастомные команды ─────────────────────────────────
+
+def _is_owner_or_admin(ctx) -> bool:
+    return ctx.author.id == ctx.guild.owner_id or bool(ctx.author.guild_permissions.administrator)
+
+
+@bot.command(name="статсервера", aliases=["serverstat", "статистика"])
+async def server_stats_cmd(ctx):
+    card = await dt.render_server_card(ctx.guild)
+    if card:
+        await ctx.send(file=discord.File(card, "server.png"))
+        return
+    online = sum(1 for m in ctx.guild.members if m.status != discord.Status.offline and not m.bot)
+    await ctx.send(
+        f"**{ctx.guild.name}**\n"
+        f"👥 Участников: {len(ctx.guild.members)} (онлайн: {online})\n"
+        f"💬 Каналов: {len(ctx.guild.text_channels)} текстовых · {len(ctx.guild.voice_channels)} голосовых\n"
+        f"✨ Бустов: {ctx.guild.premium_subscription_count or 0}"
+    )
+
+
+@bot.command(name="qr")
+async def qr_cmd(ctx, *, text: str = None):
+    if not _is_owner_or_admin(ctx):
+        await ctx.send("❌ Создавать QR-коды может только владелец сервера или администратор.")
+        return
+    if not text:
+        await ctx.send("❌ Укажи текст: `!qr https://example.com`")
+        return
+    try:
+        import qrcode, io
+        img = qrcode.make(text.strip()[:400])
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        buf.seek(0)
+        await ctx.send(file=discord.File(buf, "qr.png"))
+    except Exception as e:
+        await ctx.send(f"❌ Не удалось создать QR: {e}")
+
+
+@bot.command(name="создать_команду", aliases=["createcmd", "нкоманда"])
+async def create_custom_cmd(ctx, name: str = None, *, response: str = None):
+    if not _is_owner_or_admin(ctx):
+        await ctx.send("❌ Создавать команды может только владелец сервера или администратор.")
+        return
+    if not name or not response:
+        await ctx.send("❌ Формат: `!создать_команду !правила /текст ответа/`")
+        return
+    name = name.lstrip("!").lower().strip()
+    if not name or not name.replace("_", "").replace("-", "").isalnum():
+        await ctx.send("❌ Имя команды — только буквы/цифры/`_`/`-`.")
+        return
+    if name in bot.all_commands or name in ("плей", "play", "музыка"):
+        await ctx.send(f"❌ Команда `!{name}` уже существует у бота.")
+        return
+    if db.add_custom_command(ctx.guild.id, name, response, ctx.author.id):
+        await ctx.send(f"✅ Команда `!{name}` создана!")
+    else:
+        await ctx.send(f"❌ Команда `!{name}` уже есть. Удали сначала: `!удалить_команду {name}`")
+
+
+@bot.command(name="удалить_команду", aliases=["delcmd"])
+async def delete_custom_cmd(ctx, name: str = None):
+    if not _is_owner_or_admin(ctx):
+        await ctx.send("❌ Удалять команды может только владелец сервера или администратор.")
+        return
+    if not name:
+        await ctx.send("❌ Формат: `!удалить_команду <имя>`")
+        return
+    name = name.lstrip("!").lower().strip()
+    if db.remove_custom_command(ctx.guild.id, name):
+        await ctx.send(f"🗑 Команда `!{name}` удалена.")
+    else:
+        await ctx.send(f"❌ Команды `!{name}` нет.")
+
+
+@bot.command(name="своикоманды", aliases=["customs", "свои_команды"])
+async def list_customs_cmd(ctx):
+    rows = db.list_custom_commands(ctx.guild.id)
+    if not rows:
+        await ctx.send("📜 Кастомных команд нет. Создай: `!создать_команду !правила /текст/`")
+        return
+    lines = [f"**Кастомные команды ({len(rows)})**"]
+    lines += [f"`!{r['name']}` — {r['response'][:60]}{'…' if len(r['response']) > 60 else ''}" for r in rows]
+    await ctx.send("\n".join(lines))
+
+
 # ── Питомец-тамагочи ─────────────────────────────────────────────────────────
 
 PET_KINDS = ["🐱", "🐶", "🐹", "🐰", "🦊", "🐼", "🐥", "🐸"]
@@ -1612,6 +1699,18 @@ async def on_message(message):
 
     if not message.guild:
         return
+
+    # ── Кастомные команды сервера ──
+    if message.content.startswith("!"):
+        custom = message.content[1:].strip().lower()
+        if custom and " " not in custom:
+            row = db.get_custom_command(message.guild.id, custom)
+            if row:
+                try:
+                    await message.channel.send(row["response"])
+                except Exception:
+                    pass
+                return
 
     # ── Уровни / XP ──
     if not message.content.startswith(("!", "Луми", "Луми,", "lumi", "lumi,")):

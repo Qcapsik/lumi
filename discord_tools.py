@@ -1775,6 +1775,71 @@ def _rounded_avatar(img, size: int):
     return out
 
 
+async def render_server_card(guild: discord.Guild) -> io.BytesIO | None:
+    """Рисует карточку сервера 800x300 (PNG). Возвращает BytesIO или None."""
+    try:
+        from PIL import Image, ImageDraw, ImageFilter
+
+        width, height = 800, 300
+        base = Image.new("RGB", (width, height), (18, 20, 28))
+        draw = ImageDraw.Draw(base)
+        for y in range(height):
+            t = y / height
+            r = int(18 + (52 - 18) * t)
+            g = int(20 + (38 - 20) * t)
+            b = int(28 + (66 - 28) * t)
+            draw.line([(0, y), (width, y)], fill=(r, g, b))
+        glow = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+        glow_draw = ImageDraw.Draw(glow)
+        glow_draw.ellipse((width - 300, -180, width + 100, 220), fill=(88, 101, 242, 40))
+        glow_draw.ellipse((-180, 120, 140, 440), fill=(255, 215, 0, 30))
+        glow = glow.filter(ImageFilter.GaussianBlur(50))
+        base = Image.alpha_composite(base.convert("RGBA"), glow).convert("RGB")
+        draw = ImageDraw.Draw(base)
+
+        icon = None
+        try:
+            url = guild.icon.with_size(128).url if guild.icon else None
+            if url:
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(url, timeout=aiohttp.ClientTimeout(total=8)) as resp:
+                        if resp.status == 200:
+                            icon = Image.open(io.BytesIO(await resp.read())).convert("RGBA")
+        except Exception:
+            icon = None
+        if icon is None:
+            icon = Image.new("RGBA", (128, 128), (90, 95, 120))
+            md = ImageDraw.Draw(icon)
+            md.text((64, 64), (guild.name or "?")[:1].upper(), fill=(255, 255, 255), font=_load_font(52, True), anchor="mm")
+        icon = _rounded_avatar(icon, 120)
+        base.paste(icon, (46, (height - 120) // 2), icon)
+
+        name = (guild.name or "Сервер")[:30]
+        draw.text((206, 40), name, fill=(255, 255, 255), font=_load_font(34, True))
+
+        online = sum(1 for m in guild.members if m.status != discord.Status.offline and not m.bot)
+        total_humans = sum(1 for m in guild.members if not m.bot)
+        stats = [
+            f"👥 Участников: {total_humans} (онлайн: {online})",
+            f"💬 Каналы: {len(guild.text_channels)} текстовых · {len(guild.voice_channels)} голосовых",
+            f"✨ Бустов: {guild.premium_subscription_count or 0} (уровень {guild.premium_tier})",
+            f"😀 Эмодзи: {len(guild.emojis)}",
+        ]
+        y = 96
+        for s in stats:
+            draw.text((206, y), s, fill=(200, 205, 220), font=_load_font(16))
+            y += 30
+        created = guild.created_at.strftime("%d.%m.%Y") if guild.created_at else "—"
+        draw.text((206, 216), f"Создан: {created}", fill=(150, 158, 180), font=_load_font(13))
+
+        buf = io.BytesIO()
+        base.save(buf, format="PNG")
+        buf.seek(0)
+        return buf
+    except Exception:
+        return None
+
+
 async def render_welcome_card(member: discord.Member, rules_text: str = "") -> io.BytesIO | None:
     """Рисует приветственную карточку 800x250 (PNG). Возвращает BytesIO или None."""
     try:
