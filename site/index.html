@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lumi — универсальный бот для Discord</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<header class="nav">
+  <div class="nav-inner">
+    <div class="logo"><span class="logo-dot"></span>LU<span class="accent">MI</span></div>
+    <nav>
+      <a href="#features">Возможности</a>
+      <a href="#commands">Команды</a>
+      <a href="#pricing">Тарифы</a>
+      <a href="#faq">FAQ</a>
+    </nav>
+    <a href="premium.html" class="btn btn-gold btn-sm">Премиум</a>
+  </div>
+</header>
+
+<section class="hero">
+  <div class="hero-glow"></div>
+  <div class="hero-inner">
+    <div class="badge">🎧 Музыка · 💰 Экономика · 🏆 Ачивки · 🎰 Казино</div>
+    <h1>Lumi — твой<br>универсальный бот<span class="accent">.</span></h1>
+    <p class="sub">Музыка со SoundCloud и YouTube, живой плеер, экономика с казино и дуэлями, питомцы, ачивки, модерация и десятки команд — всё в одном боте. Бесплатно для старта.</p>
+    <div class="hero-actions">
+      <a href="#" class="btn btn-primary" id="inviteBtn">Пригласить бота</a>
+      <a href="#pricing" class="btn btn-ghost">Смотреть тарифы ↓</a>
+    </div>
+    <div class="hero-stats">
+      <div><b id="statServers">N</b><span>серверов</span></div>
+      <div><b id="statCommands">60+</b><span>команд</span></div>
+      <div><b>24/7</b><span>онлайн</span></div>
+    </div>
+  </div>
+</section>
+
+<section class="section" id="features">
+  <h2>Всё, что нужно серверу</h2>
+  <p class="section-sub">Разделы закрыты, кнопки работают, прогресс сохраняется.</p>
+  <div class="grid">
+    <div class="card"><span class="card-emoji">🎵</span><h3>Музыка</h3><p>SoundCloud и YouTube поиск, живой плеер с прогресс-баром, пауза, избранное, плейлисты, громкость и повтор — как на SoundCloud.</p></div>
+    <div class="card"><span class="card-emoji">🎰</span><h3>Казино</h3><p>Орёл/решка, кубик, рулетка, блекджек с кнопками и дуэли между игроками со ставками кредитов.</p></div>
+    <div class="card"><span class="card-emoji">💳</span><h3>Экономика</h3><p>Кредиты, магазин ролей, переводы, дневные бонусы с серией, клановая лотерея и еженедельный дайджест.</p></div>
+    <div class="card"><span class="card-emoji">🐾</span><h3>Питомцы</h3><p>Тамагочи прямо в Discord: заведи животное, корми, гладь и прокачивай до легендарных уровней.</p></div>
+    <div class="card"><span class="card-emoji">🏆</span><h3>Ачивки и профиль</h3><p>19+ достижений, PNG-карточка профиля, рамки из магазина и доска почёта голосовых.</p></div>
+    <div class="card"><span class="card-emoji">🛡️</span><h3>Модерация</h3><p>Тикеты, опросы, викторины, анонимки, варны, авто-модерация, кастомные команды и приветствия с картинкой новичка.</p></div>
+  </div>
+</section>
+
+<section class="section alt" id="commands">
+  <h2>Команды</h2>
+  <div class="cmd-cols">
+    <div>
+      <h4>🎵 Музыка</h4>
+      <code>!плей тело похудело</code><code>!скип</code><code>!пауза</code><code>!назад</code><code>!очередь</code><code>!люб <трек></code><code>!любимое 0</code>
+      <h4>🎰 Азарт</h4>
+      <code>!казино</code><code>!коин 50</code><code>!кубик 50</code><code>!рулетка 50 7</code><code>!бдж 50</code><code>!дуэль @юзер 50</code>
+    </div>
+    <div>
+      <h4>💰 Экономика</h4>
+      <code>!баланс</code><code>!день</code><code>!магазин</code><code>!перевод</code>
+      <h4>🚀 Прогресс</h4>
+      <code>!профиль</code><code>!ачивки</code><code>!топ</code><code>!топ_голос</code><code>!питомец Барсик</code><code>!рамки</code>
+      <h4>🛠 Утилиты</h4>
+      <code>!погода</code><code>!курс</code><code>!фокус 25</code><code>!напомни</code><code>!qr текст</code><code>!статсервера</code>
+    </div>
+  </div>
+</section>
+
+<section class="section" id="pricing">
+  <h2>Тарифы</h2>
+  <p class="section-sub">Бот бесплатный. Премиум даёт бонусы и поддержку проекта.</p>
+  <div class="price-grid">
+    <div class="price-card">
+      <h3>Free</h3>
+      <div class="price">0 ₽<span>/ навсегда</span></div>
+      <ul>
+        <li>✅ Все команды и музыка</li>
+        <li>✅ Экономика, ачивки, питомцы</li>
+        <li>✅ Модерация и панели</li>
+        <li>⛔ 1× XP и базовый бонус</li>
+      </ul>
+      <a href="#" class="btn btn-ghost" id="inviteBtn2">Пригласить бесплатно</a>
+    </div>
+    <div class="price-card hot">
+      <div class="hot-label">🔥 Хит</div>
+      <h3>Premium</h3>
+      <div class="price">от 99 ₽<span>/ 30 дней</span></div>
+      <ul>
+        <li>✅ 👑 Плашка в профиле</li>
+        <li>✅ 2× XP и 2× дневной бонус</li>
+        <li>✅ Эксклюзивная рамка профиля</li>
+        <li>✅ Приоритет в очереди музыки</li>
+        <li>✅ Поддержка 24/7</li>
+      </ul>
+      <a href="premium.html" class="btn btn-gold">Получить код</a>
+    </div>
+  </div>
+</section>
+
+<section class="section alt" id="faq">
+  <h2>Частые вопросы</h2>
+  <div class="faq">
+    <details><summary>Как добавить бота на сервер?</summary><p>Нажми «Пригласить бота» и выбери сервер в окне Discord. Нужны права Administrator или Connect/Speak для музыки.</p></details>
+    <details><summary>Музыка — это правда бесплатно?</summary><p>Да, поиск и воспроизведение со SoundCloud не требуют подписок и ключей.</p></details>
+    <details><summary>Как активировать премиум?</summary><p>Купи код у администратора сервера, затем напиши в Discord: <code>!активировать КОД</code></p></details>
+    <details><summary>Что если бот упрётся в лимиты Discord?</summary><p>Это частая проблема всех ботов — она решается покупкой серверного буста, а не платой за бота. Мы всегда на связи в поддержке.</p></details>
+  </div>
+</section>
+
+<footer class="footer">
+  <div>© 2026 <b>Lumi</b> · команда <b>PyQZone</b> · Антон Курченко Валейрович (Qcaps)</div>
+  <div class="footer-links"><a href="#features">Возможности</a><a href="#pricing">Тарифы</a><a href="premium.html">Премиум</a></div>
+</footer>
+
+<script src="js/main.js"></script>
+</body>
+</html>

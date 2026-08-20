@@ -12,6 +12,7 @@
 !/LICENSE
 !/README.md
 !/docs/
+!/site/
 
 *.pyc
 __pycache__/

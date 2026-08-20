@@ -499,6 +499,8 @@ async def profile_cmd(ctx, *, member=None):
         return
     frame_name = db.get_active_frame(target.guild.id, target.id)
     color = FRAMES.get(frame_name, (None,))[1] if frame_name in FRAMES else None
+    if db.is_premium(target.guild.id, target.id):
+        color = (139, 92, 246)
     img = await dt.render_profile_card(target, frame_color=color)
     if img:
         embed = discord.Embed(color=discord.Color.gold())
@@ -698,7 +700,7 @@ async def play_cmd(ctx, *, query: str = None):
     if not track:
         await ctx.send("🔍 Не удалось найти трек. Попробуй иначе: `!плей исполнитель - название`")
         return
-    result = await player.add_track(track)
+    result = await player.add_track(track, priority=db.is_premium(ctx.guild.id, ctx.author.id))
     embed = discord.Embed(title=result, description=f"🎵 **{track['title']}**\n⏱ {music.format_duration(track['duration'])}", color=0x17181A)
     msg = await ctx.send(embed=embed, view=make_player_view(player))
     player.control_message = msg
@@ -785,6 +787,8 @@ async def daily_cmd(ctx):
         )
         await ctx.send(embed=embed)
         return
+    if db.is_premium(ctx.guild.id, ctx.author.id):
+        res["reward"] *= 2
     db.add_credits(ctx.guild.id, ctx.author.id, res["reward"])
     embed = discord.Embed(
         title="🎁 Дневной бонус!",
@@ -1025,6 +1029,57 @@ async def credits_cmd(ctx, member: discord.Member, amount: int = 0):
     sign = "+" if amount > 0 else ""
     await ctx.send(f"💳 {member.display_name}: **{bal}** → **{bal + amount}** ({sign}{amount} кредитов)")
     db.log_action(ctx.guild.id, ctx.author.id, "credits_grant", {"member": member.id, "amount": amount}, f"баланс {bal} -> {bal+amount}", True)
+
+
+# ── Премиум и лицензии ───────────────────────────────────────────────────────
+
+@bot.command(name="генкод", aliases=["gencode", "лицензия"])
+async def gen_code_cmd(ctx, days: int = 30):
+    if not _is_owner_or_admin(ctx):
+        await ctx.send("❌ Создавать коды может только владелец сервера или администратор.")
+        return
+    if not 1 <= days <= 3650:
+        await ctx.send("❌ Срок от 1 до 3650 дней.")
+        return
+    code = db.create_license(ctx.guild.id, days, ctx.author.id)
+    embed = discord.Embed(
+        title="👑 Код премиума создан",
+        description=f"Код: **`{code}`**\nСрок: **{days} дн.**",
+        color=discord.Color.gold(),
+    )
+    try:
+        await ctx.author.send(embed=embed)
+        await ctx.send(f"✅ Код создан и отправлен тебе в ЛС (срок {days} дн.).")
+    except discord.Forbidden:
+        await ctx.send(embed=embed)
+        await ctx.send("⚠️ Не смог написать в ЛС — код в чате. Удали его потом через использование.")
+
+
+@bot.command(name="активировать", aliases=["activate", "код"])
+async def activate_cmd(ctx, code: str = None):
+    import time as _t
+    if not code:
+        await ctx.send("❌ Формат: `!активировать LU-XXXX-XXXX`")
+        return
+    lic = db.get_license(code)
+    if not lic:
+        await ctx.send("❌ Код не найден или уже использован.")
+        return
+    if lic["guild_id"] != ctx.guild.id:
+        await ctx.send("❌ Этот код создан для другого сервера.")
+        return
+    days = int(lic["days"])
+    until = int(_t.time()) + days * 86400
+    db.add_premium(ctx.guild.id, ctx.author.id, until)
+    db.delete_license(lic["code"])
+    from datetime import datetime
+    date = datetime.fromtimestamp(until).strftime("%d.%m.%Y")
+    embed = discord.Embed(
+        title="👑 Премиум активирован!",
+        description=f"Твой премиум активен до **{date}**.\n2× XP, 2× бонус `!день`, 👑 в профиле, приоритет в музыке.",
+        color=discord.Color.gold(),
+    )
+    await ctx.send(embed=embed)
 
 
 # ── Рамки профиля ────────────────────────────────────────────────────────────
@@ -1823,9 +1878,10 @@ async def on_message(message):
             now = time.time()
             last = db.get_last_xp_ts(message.guild.id, message.author.id)
             if now - last > 60:
-                xp = random.randint(10, 25)
+                premium = db.is_premium(message.guild.id, message.author.id)
+                xp = random.randint(10, 25) * (2 if premium else 1)
                 new_xp, level, level_up = db.add_member_message(message.guild.id, message.author.id, xp)
-                db.add_credits(message.guild.id, message.author.id, 5)
+                db.add_credits(message.guild.id, message.author.id, 5 * (2 if premium else 1))
                 stats = db.get_member_stats(message.guild.id, message.author.id)
                 await dt.unlock_achievement(message.guild, message.author.id, "intro", channel=None)
                 if stats.get("messages") >= 1000:

@@ -145,10 +145,13 @@ class MusicPlayer:
             return
         self.voice_client = await channel.connect()
 
-    async def add_track(self, track: dict) -> str:
+    async def add_track(self, track: dict, priority: bool = False) -> str:
         if len(self.queue) >= QUEUE_LIMIT:
             return f"❌ Очередь переполнена ({QUEUE_LIMIT} треков)."
-        self.queue.append(track)
+        if priority and self._playing and self.current:
+            self.queue.insert(0, track)
+        else:
+            self.queue.append(track)
         if not self._playing:
             await self._play_next()
             return f"▶️ Играет: **{track['title']}** ({format_duration(track['duration'])})"

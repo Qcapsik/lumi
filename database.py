@@ -267,6 +267,21 @@ def init_db():
                 frame TEXT NOT NULL,
                 PRIMARY KEY (guild_id, member_id, frame)
             );
+
+            CREATE TABLE IF NOT EXISTS licenses (
+                code TEXT PRIMARY KEY,
+                guild_id INTEGER NOT NULL,
+                days INTEGER NOT NULL,
+                created_by INTEGER,
+                created_at TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS premium_users (
+                guild_id INTEGER NOT NULL,
+                member_id INTEGER NOT NULL,
+                until_ts INTEGER NOT NULL,
+                PRIMARY KEY (guild_id, member_id)
+            );
             """
         )
 
@@ -1054,6 +1069,63 @@ def week_focus_stats(user_id: int) -> tuple[int, int]:
             (user_id, week_ago),
         ).fetchall()
         return len(rows), sum(r["minutes"] for r in rows)
+
+
+# ── Лицензии и премиум ──────────────────────────────────────────────────────
+
+def create_license(guild_id: int, days: int, created_by: int) -> str:
+    import random, string
+    while True:
+        code = "LU-" + "".join(random.choices(string.ascii_uppercase + string.digits, k=4)) + "-" + "".join(random.choices(string.ascii_uppercase + string.digits, k=4))
+        with _conn() as con:
+            try:
+                con.execute(
+                    "INSERT INTO licenses (code, guild_id, days, created_by, created_at) VALUES (?, ?, ?, ?, ?)",
+                    (code, guild_id, int(days), created_by, _now()),
+                )
+                return code
+            except sqlite3.IntegrityError:
+                continue
+
+
+def get_license(code: str) -> dict | None:
+    with _conn() as con:
+        row = con.execute(
+            "SELECT * FROM licenses WHERE code = ?", (code.strip().upper(),)
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def delete_license(code: str) -> bool:
+    with _conn() as con:
+        cur = con.execute("DELETE FROM licenses WHERE code = ?", (code.strip().upper(),))
+        return cur.rowcount > 0
+
+
+def add_premium(guild_id: int, member_id: int, until_ts: int):
+    with _conn() as con:
+        con.execute(
+            """
+            INSERT INTO premium_users (guild_id, member_id, until_ts) VALUES (?, ?, ?)
+            ON CONFLICT(guild_id, member_id) DO UPDATE SET
+                until_ts = MAX(until_ts, excluded.until_ts)
+            """,
+            (guild_id, member_id, int(until_ts)),
+        )
+
+
+def premium_until(guild_id: int, member_id: int) -> int:
+    with _conn() as con:
+        row = con.execute(
+            "SELECT until_ts FROM premium_users WHERE guild_id = ? AND member_id = ?",
+            (guild_id, member_id),
+        ).fetchone()
+        return row["until_ts"] if row else 0
+
+
+def is_premium(guild_id: int, member_id: int) -> bool:
+    import time as _t
+    return premium_until(guild_id, member_id) > int(_t.time())
 
 
 # ── Рамки профиля ───────────────────────────────────────────────────────────
