@@ -17,7 +17,7 @@ async function api(path, opts = {}) {
     throw new Error("backend-offline");
   }
   if (r.status === 401) {
-    window.location.href = (BASE || "") + "/auth/login";
+    window.location.href = "https://lumi-panel.onrender.com/auth/login";
     throw new Error("unauthorized");
   }
   if (!r.ok) throw new Error(await r.text());
