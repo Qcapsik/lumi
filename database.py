@@ -282,8 +282,46 @@ def init_db():
                 until_ts INTEGER NOT NULL,
                 PRIMARY KEY (guild_id, member_id)
             );
+
+            CREATE TABLE IF NOT EXISTS level_roles (
+                guild_id INTEGER NOT NULL,
+                level INTEGER NOT NULL,
+                role_id INTEGER NOT NULL,
+                PRIMARY KEY (guild_id, level)
+            );
+
+            CREATE TABLE IF NOT EXISTS promo_codes (
+                code TEXT PRIMARY KEY,
+                percent INTEGER NOT NULL DEFAULT 10,
+                active INTEGER NOT NULL DEFAULT 1,
+                max_uses INTEGER NOT NULL DEFAULT 100000,
+                used_count INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS account_keys (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                license_code TEXT NOT NULL UNIQUE,
+                months INTEGER NOT NULL,
+                amount REAL NOT NULL,
+                promo TEXT,
+                purchased_at TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS site_users (
+                user_id INTEGER PRIMARY KEY,
+                username TEXT,
+                avatar TEXT,
+                registered_at TEXT,
+                last_login_at TEXT
+            );
             """
         )
+        try:
+            con.execute("ALTER TABLE welcome_config ADD COLUMN card_enabled INTEGER DEFAULT 1")
+        except sqlite3.OperationalError:
+            pass
 
 
 def _now() -> str:
@@ -902,7 +940,7 @@ def birthdays_on_day(guild_id: int, month: int, day: int) -> list[dict]:
 
 def save_welcome_config(
     guild_id: int, channel_id: int = None, rules_text: str = None,
-    guest_role_id: int = None, enabled: bool = None,
+    guest_role_id: int = None, enabled: bool = None, card_enabled: bool = None,
 ) -> dict:
     cfg = get_welcome_config(guild_id)
     if channel_id is not None:
@@ -913,18 +951,20 @@ def save_welcome_config(
         cfg["guest_role_id"] = guest_role_id
     if enabled is not None:
         cfg["enabled"] = int(enabled)
+    if card_enabled is not None:
+        cfg["card_enabled"] = int(card_enabled)
     with _conn() as con:
         con.execute(
             """
-            INSERT INTO welcome_config (guild_id, channel_id, rules_text, guest_role_id, enabled, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO welcome_config (guild_id, channel_id, rules_text, guest_role_id, enabled, card_enabled, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(guild_id) DO UPDATE SET
                 channel_id = excluded.channel_id, rules_text = excluded.rules_text,
                 guest_role_id = excluded.guest_role_id, enabled = excluded.enabled,
-                updated_at = excluded.updated_at
+                card_enabled = excluded.card_enabled, updated_at = excluded.updated_at
             """,
             (guild_id, cfg.get("channel_id"), cfg.get("rules_text"), cfg.get("guest_role_id"),
-             cfg.get("enabled", 1), _now()),
+             cfg.get("enabled", 1), cfg.get("card_enabled", 1), _now()),
         )
     return cfg
 
@@ -933,7 +973,7 @@ def get_welcome_config(guild_id: int) -> dict:
     with _conn() as con:
         row = con.execute("SELECT * FROM welcome_config WHERE guild_id = ?", (guild_id,)).fetchone()
         if not row:
-            return {"channel_id": None, "rules_text": None, "guest_role_id": None, "enabled": 1}
+            return {"channel_id": None, "rules_text": None, "guest_role_id": None, "enabled": 1, "card_enabled": 1}
         return dict(row)
 
 
@@ -1071,6 +1111,46 @@ def week_focus_stats(user_id: int) -> tuple[int, int]:
         return len(rows), sum(r["minutes"] for r in rows)
 
 
+# ── Авто-роли за уровень ────────────────────────────────────────────────────
+
+def set_level_role(guild_id: int, level: int, role_id: int):
+    with _conn() as con:
+        con.execute(
+            """
+            INSERT INTO level_roles (guild_id, level, role_id) VALUES (?, ?, ?)
+            ON CONFLICT(guild_id, level) DO UPDATE SET role_id = excluded.role_id
+            """,
+            (guild_id, int(level), int(role_id)),
+        )
+
+
+def get_level_roles(guild_id: int) -> list[dict]:
+    with _conn() as con:
+        rows = con.execute(
+            "SELECT level, role_id FROM level_roles WHERE guild_id = ? ORDER BY level ASC",
+            (guild_id,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def get_role_for_level(guild_id: int, level: int) -> int | None:
+    with _conn() as con:
+        row = con.execute(
+            "SELECT role_id FROM level_roles WHERE guild_id = ? AND level <= ? ORDER BY level DESC LIMIT 1",
+            (guild_id, level),
+        ).fetchone()
+        return row["role_id"] if row else None
+
+
+def remove_level_role(guild_id: int, level: int) -> bool:
+    with _conn() as con:
+        cur = con.execute(
+            "DELETE FROM level_roles WHERE guild_id = ? AND level = ?",
+            (guild_id, int(level)),
+        )
+        return cur.rowcount > 0
+
+
 # ── Лицензии и премиум ──────────────────────────────────────────────────────
 
 def create_license(guild_id: int, days: int, created_by: int) -> str:
@@ -1126,6 +1206,99 @@ def premium_until(guild_id: int, member_id: int) -> int:
 def is_premium(guild_id: int, member_id: int) -> bool:
     import time as _t
     return premium_until(guild_id, member_id) > int(_t.time())
+
+
+# ── Промокоды и покупки ─────────────────────────────────────────────────────
+
+def check_promo(code: str) -> dict | None:
+    with _conn() as con:
+        row = con.execute(
+            "SELECT * FROM promo_codes WHERE code = ?", (code.strip().upper(),)
+        ).fetchone()
+        if not row:
+            return None
+        d = dict(row)
+        if not d.get("active") or d.get("used_count", 0) >= d.get("max_uses", 0):
+            return None
+        return d
+
+
+def create_promo(code: str, percent: int, max_uses: int = 100000) -> bool:
+    with _conn() as con:
+        try:
+            con.execute(
+                "INSERT INTO promo_codes (code, percent, active, max_uses, created_at) VALUES (?, ?, 1, ?, ?)",
+                (code.strip().upper(), int(percent), int(max_uses), _now()),
+            )
+            return True
+        except sqlite3.IntegrityError:
+            return False
+
+
+def use_promo(code: str) -> dict | None:
+    p = check_promo(code)
+    if not p:
+        return None
+    with _conn() as con:
+        con.execute(
+            "UPDATE promo_codes SET used_count = used_count + 1 WHERE code = ?",
+            (code.strip().upper(),),
+        )
+    return p
+
+
+def add_account_key(user_id: int, license_code: str, months: int, amount: float, promo: str | None):
+    with _conn() as con:
+        try:
+            con.execute(
+                "INSERT INTO account_keys (user_id, license_code, months, amount, promo, purchased_at) VALUES (?, ?, ?, ?, ?, ?)",
+                (user_id, license_code, int(months), float(amount), promo, _now()),
+            )
+        except sqlite3.IntegrityError:
+            pass
+
+
+def get_account_keys(user_id: int) -> list[dict]:
+    with _conn() as con:
+        rows = con.execute(
+            "SELECT * FROM account_keys WHERE user_id = ? ORDER BY id DESC", (user_id,)
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+# ── Пользователи сайта (регистрация через Discord) ──────────────────────────
+
+def register_or_login(user_id: int, username: str, avatar: str | None) -> dict:
+    """Первый вход = регистрация, повторный = вход. Возвращает запись и флаг is_new."""
+    with _conn() as con:
+        row = con.execute(
+            "SELECT * FROM site_users WHERE user_id = ?", (user_id,)
+        ).fetchone()
+        is_new = row is None
+        if is_new:
+            con.execute(
+                "INSERT INTO site_users (user_id, username, avatar, registered_at, last_login_at) VALUES (?, ?, ?, ?, ?)",
+                (user_id, username, avatar, _now(), _now()),
+            )
+        else:
+            con.execute(
+                "UPDATE site_users SET username = ?, avatar = ?, last_login_at = ? WHERE user_id = ?",
+                (username, avatar, _now(), user_id),
+            )
+        row = con.execute(
+            "SELECT * FROM site_users WHERE user_id = ?", (user_id,)
+        ).fetchone()
+    d = dict(row)
+    d["is_new"] = is_new
+    return d
+
+
+def get_site_user(user_id: int) -> dict | None:
+    with _conn() as con:
+        row = con.execute(
+            "SELECT * FROM site_users WHERE user_id = ?", (user_id,)
+        ).fetchone()
+        return dict(row) if row else None
 
 
 # ── Рамки профиля ───────────────────────────────────────────────────────────
