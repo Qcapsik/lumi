@@ -1,5 +1,11 @@
 const $ = (id) => document.getElementById(id);
 const BASE = window.LUMI_API || "";
+const KEYS_STORAGE = "lumi_keys";
+
+function getLocalKeys() {
+  try { return JSON.parse(localStorage.getItem(KEYS_STORAGE) || "[]"); }
+  catch { return []; }
+}
 
 async function api(path, opts = {}) {
   let r;
@@ -16,39 +22,9 @@ async function api(path, opts = {}) {
   return r.json();
 }
 
-async function init() {
-  const me = await api("/api/me");
-  if (!me) {
-    $("whoami").textContent = "Войдите через Discord, чтобы видеть ключи и серверы.";
-    $("loginCard").hidden = false;
-    $("logoutBtn").hidden = true;
-    $("keysSection").hidden = true;
-    return;
-  }
-  $("logoutBtn").hidden = false;
-  $("loginCard").hidden = true;
-  $("keysSection").hidden = false;
-  const welcome = new URLSearchParams(location.search).get("welcome") === "1";
-  $("whoami").textContent = "Вы вошли как @" + me.username;
-  if (me.registered_at) {
-    const regDay = me.registered_at.slice(0, 10);
-    $("whoami").textContent += " · зарегистрирован " + regDay;
-  }
-  if (welcome) {
-    const banner = document.createElement("div");
-    banner.style.cssText =
-      "max-width:720px;margin:0 auto 20px;background:var(--card);border:1px solid var(--line);" +
-      "border-radius:var(--radius);padding:16px 20px;color:var(--green);font-weight:600";
-    banner.textContent = "🎉 Добро пожаловать! Аккаунт создан — это твой личный кабинет.";
-    document.querySelector(".acct").insertBefore(banner, document.querySelector(".acct-card, #keysSection"));
-  }
-  const keys = await api("/api/account/keys") || [];
-  if (!keys.length) {
-    $("noKeys").hidden = false;
-    return;
-  }
-  $("noKeys").hidden = true;
+function renderKeys(keys) {
   const list = $("keysList");
+  list.innerHTML = "";
   keys.forEach((k) => {
     const el = document.createElement("div");
     el.className = "key";
@@ -74,6 +50,54 @@ async function init() {
     };
     list.appendChild(el);
   });
+}
+
+async function init() {
+  const me = await api("/api/me");
+  const localKeys = getLocalKeys();
+
+  if (!me) {
+    $("logoutBtn").hidden = true;
+    if (localKeys.length) {
+      $("whoami").textContent = "Войдите через Discord для синхронизации ключей. Пока ключи хранятся локально.";
+      $("keysSection").hidden = false;
+      $("noKeys").hidden = true;
+      renderKeys(localKeys);
+    } else {
+      $("whoami").textContent = "Купи премиум — ключ автоматически появится здесь.";
+      $("loginCard").hidden = false;
+      $("keysSection").hidden = true;
+    }
+    return;
+  }
+
+  $("logoutBtn").hidden = false;
+  $("loginCard").hidden = true;
+  $("keysSection").hidden = false;
+  $("whoami").textContent = "Вы вошли как @" + me.username;
+
+  const welcome = new URLSearchParams(location.search).get("welcome") === "1";
+  if (me.registered_at) {
+    $("whoami").textContent += " · зарегистрирован " + me.registered_at.slice(0, 10);
+  }
+  if (welcome) {
+    const banner = document.createElement("div");
+    banner.style.cssText =
+      "max-width:720px;margin:0 auto 20px;background:var(--card);border:1px solid var(--line);" +
+      "border-radius:var(--radius);padding:16px 20px;color:var(--green);font-weight:600";
+    banner.textContent = "🎉 Добро пожаловать! Аккаунт создан — это твой личный кабинет.";
+    document.querySelector(".acct").insertBefore(banner, document.querySelector(".acct-card, #keysSection"));
+  }
+
+  let keys = await api("/api/account/keys");
+  if (!keys) keys = [];
+  const allKeys = [...keys, ...localKeys.filter((lk) => !keys.some((k) => k.license === lk.license))];
+  if (!allKeys.length) {
+    $("noKeys").hidden = false;
+    return;
+  }
+  $("noKeys").hidden = true;
+  renderKeys(allKeys);
 }
 
 init();

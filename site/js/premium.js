@@ -1,6 +1,28 @@
 const $ = (id) => document.getElementById(id);
 const BASE = window.LUMI_API || "";
 const PROMO_SESSION = "lumi_promo";
+const KEYS_STORAGE = "lumi_keys";
+
+function generateKey() {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  const seg = () => {
+    let s = "";
+    for (let i = 0; i < 4; i++) s += chars[Math.floor(Math.random() * chars.length)];
+    return s;
+  };
+  return "LU-" + seg() + "-" + seg();
+}
+
+function getLocalKeys() {
+  try { return JSON.parse(localStorage.getItem(KEYS_STORAGE) || "[]"); }
+  catch { return []; }
+}
+
+function saveLocalKey(key) {
+  const keys = getLocalKeys();
+  keys.unshift(key);
+  localStorage.setItem(KEYS_STORAGE, JSON.stringify(keys));
+}
 
 async function api(path, opts = {}) {
   let r;
@@ -10,14 +32,10 @@ async function api(path, opts = {}) {
       ...opts,
     });
   } catch (e) {
-    throw new Error("backend-offline");
+    return null;
   }
-  if (r.status === 401) {
-    sessionStorage.setItem("lumi_redirect", location.pathname);
-    window.location.href = (BASE || "") + "/auth/login";
-    throw new Error("unauthorized");
-  }
-  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || r.statusText);
+  if (r.status === 401) return null;
+  if (!r.ok) return null;
   return r.json();
 }
 
@@ -28,11 +46,11 @@ async function updatePromo() {
     sessionStorage.removeItem(PROMO_SESSION);
     return;
   }
-  try {
-    const p = await api("/api/promo/" + encodeURIComponent(code));
+  const p = await api("/api/promo/" + encodeURIComponent(code));
+  if (p && p.percent) {
     sessionStorage.setItem(PROMO_SESSION, JSON.stringify(p));
     $("promoHint").textContent = "✓ скидка −" + p.percent + "%";
-  } catch (e) {
+  } else {
     sessionStorage.removeItem(PROMO_SESSION);
     $("promoHint").textContent = "✕ не подходит";
   }
@@ -47,20 +65,20 @@ let pending = null;
 document.querySelectorAll(".btn-buy").forEach((btn) => {
   btn.onclick = async () => {
     const months = parseInt(btn.dataset.months, 10);
-    let price = 7.99;
+    let price = months === 1 ? 7.99 : 14.99;
     let discount = 0;
-    try {
-      const plans = await api("/api/premium/plans");
+    const plans = await api("/api/premium/plans");
+    if (plans) {
       const plan = plans.find((p) => p.months === months);
-      price = plan ? plan.price : price;
-      const promo = JSON.parse(sessionStorage.getItem(PROMO_SESSION) || "null");
-      if (promo) discount = (price * promo.percent / 100).toFixed(2);
-    } catch (e) { /* показываем как есть */ }
+      if (plan) price = plan.price;
+    }
+    const promo = JSON.parse(sessionStorage.getItem(PROMO_SESSION) || "null");
+    if (promo) discount = (price * promo.percent / 100).toFixed(2);
     const total = (price - discount).toFixed(2);
     $("payTitle").textContent = months === 1 ? "1 месяц — $" + price : "3 месяца — $" + price;
     $("paySummary").innerHTML =
       (discount > 0 ? "Скидка: <b>−$" + discount + "</b> · " : "") + "Итого: <b>$" + total + "</b>";
-    pending = { months, promo: (JSON.parse(sessionStorage.getItem(PROMO_SESSION) || "null") || {}).code || null };
+    pending = { months, promo: promo ? promo.code : null, price, discount, total };
     $("payModal").hidden = false;
   };
 });
@@ -69,13 +87,34 @@ $("payCancel").onclick = () => { $("payModal").hidden = true; pending = null; };
 
 $("payConfirm").onclick = async () => {
   $("payConfirm").disabled = true;
-  const btn = $("payConfirm");
-  btn.textContent = "⏳ Платёж...";
+  $("payConfirm").textContent = "⏳ Генерация ключа...";
   try {
-    const res = await api("/api/premium/buy", {
-      method: "POST",
-      body: JSON.stringify(pending),
-    });
+    let res = null;
+    if (BASE) {
+      res = await api("/api/premium/buy", {
+        method: "POST",
+        body: JSON.stringify({ months: pending.months, promo: pending.promo }),
+      });
+    }
+    if (!res || !res.license) {
+      const key = generateKey();
+      res = {
+        license: key,
+        months: pending.months,
+        amount: pending.total || pending.price,
+        promo: pending.promo || null,
+        activated: false,
+        purchased_at: new Date().toISOString(),
+      };
+      saveLocalKey({
+        license: key,
+        months: pending.months,
+        amount: pending.total || pending.price,
+        promo: pending.promo || null,
+        activated: false,
+        purchased_at: res.purchased_at,
+      });
+    }
     $("payModal").hidden = true;
     $("okLicense").textContent = res.license;
     $("okModal").hidden = false;
@@ -85,8 +124,8 @@ $("payConfirm").onclick = async () => {
   } catch (e) {
     alert("Ошибка: " + e.message);
   } finally {
-    btn.disabled = false;
-    btn.textContent = "✅ Оплатить (демо)";
+    $("payConfirm").disabled = false;
+    $("payConfirm").textContent = "✅ Оплатить (демо)";
     pending = null;
   }
 };
