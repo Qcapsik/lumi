@@ -60,7 +60,7 @@
   font-family: "Fira Code", Consolas, monospace;
   font-size: 16px;
   letter-spacing: 1px;
-  color: var(--gold);
+  color: var(--violet);
   flex: 1;
   word-break: break-all;
 }
@@ -79,7 +79,7 @@
 
 .badge { padding: 3px 10px; border-radius: 999px; font-size: 11px; font-weight: 700; }
 .badge--ok { background: rgba(34, 197, 94, 0.15); color: var(--green); }
-.badge--wait { background: rgba(255, 179, 0, 0.15); color: var(--gold); }
+.badge--wait { background: rgba(139, 92, 246, 0.15); color: var(--violet); }
 
 .empty-state {
   text-align: center;
@@ -91,7 +91,7 @@
 .empty-state code {
   background: rgba(16, 17, 38, 0.8);
   padding: 2px 8px; border-radius: 6px;
-  color: var(--gold); font-size: 13px;
+  color: var(--violet); font-size: 13px;
 }
 
 @media (max-width: 760px) {

@@ -25,14 +25,14 @@
 
 .plan:hover { transform: translateY(-4px); }
 .plan--best {
-  border-color: rgba(255, 215, 0, 0.5);
-  box-shadow: 0 0 40px rgba(255, 179, 0, 0.12);
+  border-color: rgba(139, 92, 246, 0.5);
+  box-shadow: 0 0 40px rgba(139, 92, 246, 0.12);
 }
 
 .plan-badge {
   position: absolute; top: -14px; left: 50%; transform: translateX(-50%);
-  background: linear-gradient(135deg, var(--gold), var(--gold2));
-  color: #1a1200; font-weight: 800; font-size: 12px;
+  background: linear-gradient(135deg, var(--blue), var(--blue2));
+  color: #fff; font-weight: 800; font-size: 12px;
   padding: 4px 16px; border-radius: 999px; white-space: nowrap;
 }
 
@@ -72,10 +72,10 @@
   outline: none;
   transition: border-color .2s;
 }
-.code-row input:focus { border-color: var(--gold); }
+.code-row input:focus { border-color: var(--violet); }
 
 .hint { color: var(--muted); font-size: 13px; margin-top: 10px; }
-.hint code, .prem-box code, .steps code { color: var(--gold); }
+.hint code, .prem-box code, .steps code { color: var(--violet); }
 
 .modal {
   position: fixed; inset: 0; z-index: 100;
@@ -106,8 +106,8 @@
 .modal-box p { color: var(--muted); }
 .key-code {
   background: rgba(8, 9, 14, 0.8);
-  border: 1px dashed var(--gold);
-  color: var(--gold);
+  border: 1px dashed var(--violet);
+  color: var(--violet);
   font-family: "Fira Code", Consolas, monospace;
   font-size: 18px;
   letter-spacing: 1px;

@@ -5,8 +5,8 @@
   --line: #1e2236;
   --text: #e8eaf6;
   --muted: #8b90a8;
-  --gold: #ffd700;
-  --gold2: #ffb300;
+  --blue: #3b82f6;
+  --blue2: #2563eb;
   --violet: #8b5cf6;
   --green: #22c55e;
   --red: #ef4444;
@@ -23,7 +23,7 @@ body {
   overflow-x: hidden;
 }
 
-.accent { color: var(--gold); }
+.accent { color: var(--violet); }
 
 /* ── Навигация ── */
 .nav {
@@ -40,24 +40,26 @@ body {
   font-weight: 800; font-size: 22px; letter-spacing: 2px;
   display: flex; align-items: center; gap: 8px;
 }
+.logo .lu { color: var(--blue); }
+.logo .mi { color: var(--violet); }
 .logo-dot {
   width: 12px; height: 12px; border-radius: 50%;
-  background: radial-gradient(circle at 30% 30%, var(--gold), var(--gold2));
-  box-shadow: 0 0 14px var(--gold);
+  background: radial-gradient(circle at 30% 30%, var(--blue), var(--blue2));
+  box-shadow: 0 0 14px var(--blue);
   animation: pulse 2s ease-in-out infinite;
 }
 @keyframes pulse {
-  0%, 100% { box-shadow: 0 0 14px var(--gold); }
-  50% { box-shadow: 0 0 22px var(--gold), 0 0 40px rgba(255, 215, 0, 0.2); }
+  0%, 100% { box-shadow: 0 0 14px var(--blue); }
+  50% { box-shadow: 0 0 22px var(--blue), 0 0 40px rgba(59, 130, 246, 0.2); }
 }
 .logo-tag {
   font-size: 11px; font-weight: 700; color: var(--bg);
-  background: linear-gradient(135deg, var(--gold), var(--gold2));
+  background: linear-gradient(135deg, var(--violet), var(--blue2));
   padding: 3px 10px; border-radius: 8px; letter-spacing: 1px;
 }
 .nav nav { display: flex; gap: 24px; }
 .nav nav a { color: var(--muted); text-decoration: none; font-size: 15px; transition: color .2s; }
-.nav nav a:hover { color: var(--gold); }
+.nav nav a:hover { color: var(--violet); }
 .nav a { font-size: 15px; }
 
 /* ── Кнопки ── */
@@ -70,22 +72,22 @@ body {
 .btn:hover { transform: translateY(-2px); }
 .btn-sm { padding: 8px 18px; font-size: 14px; border-radius: 10px; }
 .btn-gold {
-  background: linear-gradient(135deg, var(--gold), var(--gold2));
-  color: #1a1200;
-  box-shadow: 0 4px 20px rgba(255, 179, 0, 0.3);
-}
-.btn-gold:hover { box-shadow: 0 6px 28px rgba(255, 179, 0, 0.45); }
-.btn-primary {
   background: linear-gradient(135deg, var(--violet), #6d28d9);
-  color: #fff; box-shadow: 0 4px 20px rgba(139, 92, 246, 0.35);
+  color: #fff;
+  box-shadow: 0 4px 20px rgba(139, 92, 246, 0.3);
 }
-.btn-primary:hover { box-shadow: 0 6px 28px rgba(139, 92, 246, 0.5); }
+.btn-gold:hover { box-shadow: 0 6px 28px rgba(139, 92, 246, 0.5); }
+.btn-primary {
+  background: linear-gradient(135deg, var(--blue), var(--blue2));
+  color: #fff; box-shadow: 0 4px 20px rgba(59, 130, 246, 0.35);
+}
+.btn-primary:hover { box-shadow: 0 6px 28px rgba(59, 130, 246, 0.5); }
 .btn-ghost {
   background: rgba(30, 34, 54, 0.5); color: var(--text);
   border: 1px solid var(--line);
   backdrop-filter: blur(8px);
 }
-.btn-ghost:hover { border-color: var(--gold); color: var(--gold); background: rgba(255, 215, 0, 0.05); }
+.btn-ghost:hover { border-color: var(--violet); color: var(--violet); background: rgba(139, 92, 246, 0.05); }
 
 .nav-actions { display: flex; gap: 10px; align-items: center; }
 .btn-discord-sm {
@@ -108,9 +110,9 @@ body {
 .hero-glow {
   position: absolute; inset: 0; pointer-events: none;
   background:
-    radial-gradient(700px 350px at 10% 0%, rgba(139, 92, 246, 0.22), transparent 70%),
-    radial-gradient(700px 350px at 90% 20%, rgba(255, 215, 0, 0.14), transparent 70%),
-    radial-gradient(400px 400px at 50% 80%, rgba(139, 92, 246, 0.08), transparent 70%);
+    radial-gradient(700px 350px at 10% 0%, rgba(59, 130, 246, 0.22), transparent 70%),
+    radial-gradient(700px 350px at 90% 20%, rgba(139, 92, 246, 0.14), transparent 70%),
+    radial-gradient(400px 400px at 50% 80%, rgba(59, 130, 246, 0.08), transparent 70%);
 }
 .hero-particles {
   position: absolute; inset: 0; pointer-events: none;
@@ -141,7 +143,7 @@ body {
   margin-top: 52px; flex-wrap: wrap;
   animation: fadeInUp .6s ease-out .4s both;
 }
-.hero-stats b { display: block; font-size: 32px; color: var(--gold); }
+.hero-stats b { display: block; font-size: 32px; color: var(--violet); }
 .hero-stats span { color: var(--muted); font-size: 14px; }
 
 @keyframes fadeInUp {
@@ -172,8 +174,8 @@ body {
 }
 .card:hover {
   transform: translateY(-6px);
-  border-color: rgba(255, 215, 0, 0.4);
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(255, 215, 0, 0.1);
+  border-color: rgba(139, 92, 246, 0.4);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(139, 92, 246, 0.1);
 }
 .card-emoji { font-size: 36px; display: block; margin-bottom: 14px; }
 .card h3 { font-size: 20px; margin-bottom: 8px; }
@@ -184,7 +186,7 @@ body {
   display: grid; grid-template-columns: 1fr 1fr; gap: 32px;
   max-width: 920px; margin: 0 auto; padding: 0 24px;
 }
-.cmd-cols h4 { color: var(--gold); margin: 20px 0 12px; font-size: 16px; }
+.cmd-cols h4 { color: var(--violet); margin: 20px 0 12px; font-size: 16px; }
 .cmd-cols code {
   display: inline-block;
   background: rgba(16, 17, 38, 0.8);
@@ -211,13 +213,13 @@ body {
 }
 .price-card:hover { transform: translateY(-4px); }
 .price-card.hot {
-  border-color: rgba(255, 215, 0, 0.5);
-  box-shadow: 0 0 40px rgba(255, 179, 0, 0.12);
+  border-color: rgba(139, 92, 246, 0.5);
+  box-shadow: 0 0 40px rgba(139, 92, 246, 0.12);
 }
 .hot-label {
   position: absolute; top: -14px; right: 18px;
-  background: linear-gradient(135deg, var(--gold), var(--gold2));
-  color: #1a1200; font-weight: 800; font-size: 12px;
+  background: linear-gradient(135deg, var(--blue), var(--blue2));
+  color: #fff; font-weight: 800; font-size: 12px;
   padding: 5px 14px; border-radius: 999px;
 }
 .price-card h3 { font-size: 21px; }
@@ -261,7 +263,7 @@ body {
   font-size: 16px; font-family: "Fira Code", Consolas, monospace; letter-spacing: 1px;
   outline: none; transition: border-color .2s;
 }
-.prem-box input:focus { border-color: var(--gold); }
+.prem-box input:focus { border-color: var(--violet); }
 .hint { color: var(--muted); font-size: 13.5px; }
 .hint.ok { color: var(--green); }
 .hint.err { color: var(--red); }
@@ -277,8 +279,8 @@ body {
 }
 .step b {
   width: 36px; height: 36px; flex-shrink: 0;
-  background: linear-gradient(135deg, var(--gold), var(--gold2));
-  color: #1a1200; border-radius: 50%;
+  background: linear-gradient(135deg, var(--blue), var(--blue2));
+  color: #fff; border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
 }
 .step code { background: rgba(16, 17, 38, 0.8); padding: 2px 8px; border-radius: 6px; color: #c7d2fe; }
@@ -291,7 +293,7 @@ body {
 }
 .footer-links { display: flex; gap: 20px; justify-content: center; }
 .footer-links a { color: var(--muted); text-decoration: none; transition: color .2s; }
-.footer-links a:hover { color: var(--gold); }
+.footer-links a:hover { color: var(--violet); }
 
 @media (max-width: 760px) {
   .hero h1 { font-size: 40px; }
