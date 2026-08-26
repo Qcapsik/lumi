@@ -1,0 +1,1 @@
+window.LUMI_API = "https://lumi-panel.onrender.com";

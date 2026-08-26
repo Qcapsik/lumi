@@ -1,0 +1,119 @@
+/* ── Premium: тарифы и покупка ────────────────────────────────── */
+
+.plans {
+  display: flex;
+  justify-content: center;
+  gap: 24px;
+  flex-wrap: wrap;
+  margin: 32px 0 8px;
+}
+
+.plan {
+  position: relative;
+  background: rgba(18, 20, 31, 0.6);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 32px 28px;
+  width: 290px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  transition: all .25s ease;
+  backdrop-filter: blur(4px);
+}
+
+.plan:hover { transform: translateY(-4px); }
+.plan--best {
+  border-color: rgba(255, 215, 0, 0.5);
+  box-shadow: 0 0 40px rgba(255, 179, 0, 0.12);
+}
+
+.plan-badge {
+  position: absolute; top: -14px; left: 50%; transform: translateX(-50%);
+  background: linear-gradient(135deg, var(--gold), var(--gold2));
+  color: #1a1200; font-weight: 800; font-size: 12px;
+  padding: 4px 16px; border-radius: 999px; white-space: nowrap;
+}
+
+.plan h3 { font-size: 20px; }
+.plan-price { font-size: 36px; font-weight: 800; }
+.plan-old { color: var(--muted); text-decoration: line-through; font-size: 14px; margin-top: -6px; }
+
+.plan ul { list-style: none; text-align: left; font-size: 14px; color: var(--muted); display: grid; gap: 10px; flex: 1; }
+.plan ul li::before { content: "✓ "; color: var(--green); font-weight: 800; }
+
+.btn-buy { margin-top: 14px; }
+
+.prem-box {
+  max-width: 480px;
+  margin: 36px auto 0;
+  background: rgba(18, 20, 31, 0.6);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 24px;
+  text-align: left;
+}
+
+.prem-box label { display: block; font-size: 14px; color: var(--muted); margin-bottom: 8px; }
+.hint-inline { font-weight: 700; color: var(--green); }
+
+.code-row { display: flex; gap: 10px; }
+.code-row input {
+  flex: 1;
+  background: rgba(8, 9, 14, 0.8);
+  border: 1px solid var(--line);
+  color: var(--text);
+  border-radius: 10px;
+  padding: 12px 14px;
+  font-size: 16px;
+  font-family: "Fira Code", Consolas, monospace;
+  letter-spacing: 1px;
+  outline: none;
+  transition: border-color .2s;
+}
+.code-row input:focus { border-color: var(--gold); }
+
+.hint { color: var(--muted); font-size: 13px; margin-top: 10px; }
+.hint code, .prem-box code, .steps code { color: var(--gold); }
+
+.modal {
+  position: fixed; inset: 0; z-index: 100;
+  background: rgba(5, 6, 12, 0.8);
+  backdrop-filter: blur(8px);
+  display: flex; align-items: center; justify-content: center;
+  padding: 20px;
+  animation: fadeIn .2s ease;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.modal-box {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 36px;
+  max-width: 420px;
+  width: 100%;
+  text-align: center;
+  display: grid;
+  gap: 14px;
+}
+
+.modal-box p { color: var(--muted); }
+.key-code {
+  background: rgba(8, 9, 14, 0.8);
+  border: 1px dashed var(--gold);
+  color: var(--gold);
+  font-family: "Fira Code", Consolas, monospace;
+  font-size: 18px;
+  letter-spacing: 1px;
+  padding: 14px;
+  border-radius: 10px;
+  user-select: all;
+}
+
+.btn--block { width: 100%; justify-content: center; }
