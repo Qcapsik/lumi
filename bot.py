@@ -340,6 +340,60 @@ async def ai_completion(messages: list, tools: list) -> dict:
     raise RuntimeError(f"AI недоступен: {last_err}")
 
 
+async def lumi_chat(prompt: str) -> dict:
+    """Прямой чат с Луми (без инструментов): платная модель → бесплатная → ошибка."""
+    last_err = "Неизвестная ошибка"
+    full_messages = [
+        {
+            "role": "system",
+            "content": (
+                "Ты — Луми, дружелюбный и находчивый ИИ-помощник Discord-бота. "
+                "Отвечай кратко и по делу, по-русски."
+            ),
+        },
+        {"role": "user", "content": prompt},
+    ]
+    try:
+        response = await ai_client.chat.completions.create(
+            model=AI_MODEL,
+            messages=full_messages,
+            temperature=0.7,
+        )
+        content = response.choices[0].message.content or None
+        if content:
+            return {"content": content, "provider": "relay"}
+        last_err = "Платная модель вернула пустой ответ"
+    except Exception as e:
+        last_err = f"{type(e).__name__}: {e}"
+    for attempt in range(4):
+        try:
+            payload = {"model": "openai", "messages": full_messages, "max_tokens": 2000}
+            headers = {
+                "Content-Type": "application/json",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126.0 Safari/537.36",
+                "Referer": "https://pollinations.ai/",
+            }
+            timeout = aiohttp.ClientTimeout(total=90)
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    "https://text.pollinations.ai/openai", json=payload, headers=headers, timeout=timeout
+                ) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        msg = (data.get("choices") or [{}])[0].get("message", {})
+                        content = msg.get("content") or None
+                        if content:
+                            return {"content": content, "provider": "free(pollinations)"}
+                        last_err = "Бесплатная модель вернула пустой ответ"
+                    else:
+                        last_err = f"free({resp.status})"
+        except Exception as e:
+            last_err = f"free: {type(e).__name__}: {e}"
+        if attempt < 3:
+            await asyncio.sleep((attempt + 1) * 3)
+    raise RuntimeError(f"Луми недоступен: {last_err}")
+
+
 async def run_agent(guild, user_id, messages: list, notify_message: discord.Message = None) -> str:
     """Многошаговый цикл: AI вызывает инструменты пока не закончит."""
     final_text = ""
@@ -1065,7 +1119,7 @@ async def activate_cmd(ctx, code: str = None):
     if not lic:
         await ctx.send("❌ Код не найден или уже использован.")
         return
-    if lic["guild_id"] != ctx.guild.id:
+    if lic["guild_id"] not in (0, ctx.guild.id):
         await ctx.send("❌ Этот код создан для другого сервера.")
         return
     days = int(lic["days"])
@@ -1830,7 +1884,7 @@ async def on_member_join(member):
                 description=f"{member.mention}\n\n{rules}",
                 color=discord.Color.green(),
             )
-            card = await dt.render_welcome_card(member, rules)
+            card = await dt.render_welcome_card(member, rules) if cfg.get("card_enabled", 1) else None
             if card:
                 await channel.send(embed=embed, file=discord.File(card, filename="welcome.png"))
             else:
@@ -1872,6 +1926,38 @@ async def on_message(message):
                     pass
                 return
 
+    # ── «Луми, …» — ИИ-чат (премиум) ──
+    if re.match(r"^(луми|lumi)[\s,]", message.content, re.IGNORECASE):
+        prompt = re.sub(r"^(луми|lumi)[\s,]*", "", message.content, flags=re.IGNORECASE).strip()
+        if not db.is_premium(message.guild.id, message.author.id):
+            embed = discord.Embed(
+                title="👑 Это премиум-функция",
+                description=(
+                    f"{message.author.mention}, общение с **Луми** доступно только с премиумом.\n"
+                    "Купи ключ на сайте **lumi.site** (промокод `LumiAI` −10%) или спроси у админа сервера."
+                ),
+                color=0x8B5CF6,
+            )
+            await message.reply(embed=embed)
+            return
+        if not prompt:
+            await message.reply("Пример: `Луми, расскажи анекдот`")
+            return
+        async with message.channel.typing():
+            try:
+                result = await lumi_chat(prompt)
+                text = result["content"]
+            except RuntimeError as e:
+                await message.reply(f"⚠️ {e}")
+                return
+        if len(text) <= 1900:
+            await message.reply(text)
+        else:
+            await message.reply(text[:1900])
+            for i in range(1900, len(text), 1900):
+                await message.channel.send(text[i:i + 1900])
+        return
+
     # ── Уровни / XP ──
     if not message.content.startswith(("!", "Луми", "Луми,", "lumi", "lumi,")):
         try:
@@ -1898,6 +1984,14 @@ async def on_message(message):
                         f"🎉 **{message.author.display_name}**, новый уровень: **{level}** (+50 💰)!"
                     )
                     db.add_credits(message.guild.id, message.author.id, 50)
+                    role_id = db.get_role_for_level(message.guild.id, level)
+                    if role_id:
+                        role = message.guild.get_role(role_id)
+                        if role and role not in message.author.roles:
+                            try:
+                                await message.author.add_roles(role, reason=f"Уровень {level}")
+                            except (discord.Forbidden, discord.HTTPException):
+                                pass
         except Exception:
             pass
 
