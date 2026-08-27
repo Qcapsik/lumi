@@ -1,11 +1,5 @@
 const $ = (id) => document.getElementById(id);
 const BASE = window.LUMI_API || "";
-const KEYS_STORAGE = "lumi_keys";
-
-function getLocalKeys() {
-  try { return JSON.parse(localStorage.getItem(KEYS_STORAGE) || "[]"); }
-  catch { return []; }
-}
 
 async function api(path, opts = {}) {
   let r;
@@ -54,26 +48,19 @@ function renderKeys(keys) {
 
 async function init() {
   const me = await api("/api/me");
-  const localKeys = getLocalKeys();
 
   if (!me) {
     $("logoutBtn").hidden = true;
-    if (localKeys.length) {
-      $("whoami").textContent = "Войдите через Discord для синхронизации ключей. Пока ключи хранятся локально.";
-      $("keysSection").hidden = false;
-      $("noKeys").hidden = true;
-      renderKeys(localKeys);
-    } else {
-      $("whoami").textContent = "Купи премиум — ключ автоматически появится здесь.";
-      $("loginCard").hidden = false;
-      $("keysSection").hidden = true;
-    }
+    $("whoami").textContent = "Войдите через Discord, чтобы видеть ключи и серверы.";
+    $("loginCard").hidden = false;
+    $("keysSection").hidden = true;
     return;
   }
 
   $("logoutBtn").hidden = false;
   $("loginCard").hidden = true;
   $("keysSection").hidden = false;
+
   $("whoami").textContent = "Вы вошли как @" + me.username;
 
   const welcome = new URLSearchParams(location.search).get("welcome") === "1";
@@ -89,15 +76,13 @@ async function init() {
     document.querySelector(".acct").insertBefore(banner, document.querySelector(".acct-card, #keysSection"));
   }
 
-  let keys = await api("/api/account/keys");
-  if (!keys) keys = [];
-  const allKeys = [...keys, ...localKeys.filter((lk) => !keys.some((k) => k.license === lk.license))];
-  if (!allKeys.length) {
+  const keys = await api("/api/account/keys") || [];
+  if (!keys.length) {
     $("noKeys").hidden = false;
     return;
   }
   $("noKeys").hidden = true;
-  renderKeys(allKeys);
+  renderKeys(keys);
 }
 
 init();

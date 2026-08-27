@@ -264,7 +264,7 @@ async def payment_success(session_id: str = ""):
     promo = meta.get("promo") or None
     amount = float(meta.get("amount", 0))
 
-    if user_id and not db.get_account_keys(user_id):
+    if user_id:
         days = months * 30
         license_code = db.create_license(0, days, user_id)
         db.add_account_key(user_id, license_code, months, amount, promo)
@@ -278,14 +278,14 @@ body{{background:#08090e;color:#e8eaf6;font-family:system-ui;display:flex;align-
 .box{{text-align:center;max-width:440px;padding:40px}}
 h1{{font-size:28px;margin-bottom:12px}}
 p{{color:#8b90a8;margin-bottom:8px}}
-.key{{background:#12141f;border:1px dashed #ffd700;color:#ffd700;font-family:monospace;font-size:18px;padding:16px;border-radius:12px;margin:20px 0;letter-spacing:1px;user-select:all}}
-a{{color:#8b5cf6;text-decoration:none;font-weight:700}}
+.key{{background:#12141f;border:1px dashed #8b5cf6;color:#8b5cf6;font-family:monospace;font-size:18px;padding:16px;border-radius:12px;margin:20px 0;letter-spacing:1px;user-select:all}}
+a{{color:#3b82f6;text-decoration:none;font-weight:700}}
 a:hover{{text-decoration:underline}}
 </style></head>
 <body><div class="box">
 <h1>Оплата прошла!</h1>
 <p>Твой ключ сохранён в личном кабинете.</p>
-<div class="key">{db.get_account_keys(user_id)[-1]['license_code'] if db.get_account_keys(user_id) else 'Ошибка'}</div>
+<div class="key">{license_code}</div>
 <p>Активируй в Discord: <b>!активировать КОД</b></p>
 <a href="/account.html">Открыть кабинет →</a>
 </div></body></html>""")
@@ -337,7 +337,7 @@ async def api_servers(request: Request):
 @app.get("/api/server/{gid}")
 async def api_server(gid: int, request: Request):
     s = _require_session(request)
-    _check_admin(gid, s)
+    await _check_admin(gid, s)
     welcome = db.get_welcome_config(gid)
     automod = db.get_automod(gid)
     level_roles = db.get_level_roles(gid)
@@ -362,7 +362,7 @@ async def api_server(gid: int, request: Request):
 @app.get("/api/server/{gid}/assets")
 async def api_server_assets(gid: int, request: Request):
     s = _require_session(request)
-    _check_admin(gid, s)
+    await _check_admin(gid, s)
     channels = await _bot_get(f"/guilds/{gid}/channels")
     roles = await _bot_get(f"/guilds/{gid}/roles")
     out_channels = []
@@ -381,7 +381,7 @@ async def api_server_assets(gid: int, request: Request):
 @app.post("/api/server/{gid}/save")
 async def api_server_save(gid: int, request: Request):
     s = _require_session(request)
-    _check_admin(gid, s)
+    await _check_admin(gid, s)
     body = await request.json()
     if "welcome" in body:
         w = body["welcome"]
@@ -419,9 +419,10 @@ def _clear_level_roles(gid: int):
         con.execute("DELETE FROM level_roles WHERE guild_id = ?", (gid,))
 
 
-def _check_admin(gid: int, s: dict):
-    # Проверяем через юзер-токен, что пользователь админ гильдии и бот её знает.
-    if gid not in {int(r["guild_id"]) for r in _known_guilds()}:
+async def _check_admin(gid: int, s: dict):
+    guilds = await _user_admin_guilds(s)
+    ids = {g["id"] for g in guilds}
+    if gid not in ids:
         raise HTTPException(status_code=404, detail="Сервер не найден")
 
 
