@@ -101,6 +101,17 @@ body {
 }
 .btn-discord-sm:hover { background: #4752c4; transform: translateY(-1px); box-shadow: 0 4px 16px rgba(88, 101, 242, 0.4); }
 
+.btn-discord {
+  display: inline-flex; align-items: center; gap: 10px;
+  background: #5865f2; color: #fff;
+  padding: 14px 28px; border-radius: 14px;
+  font-weight: 700; font-size: 15px;
+  text-decoration: none;
+  box-shadow: 0 4px 20px rgba(88, 101, 242, 0.35);
+  transition: all .2s;
+}
+.btn-discord:hover { transform: translateY(-2px); box-shadow: 0 6px 28px rgba(88, 101, 242, 0.5); }
+
 /* ── Hero ── */
 .hero {
   position: relative; overflow: hidden;
