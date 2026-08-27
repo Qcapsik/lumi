@@ -121,9 +121,10 @@ app.mount("/js", StaticFiles(directory=SITE_DIR / "js"), name="js")
 # ── Авторизация ─────────────────────────────────────────────────────────────
 
 @app.get("/auth/login")
-async def auth_login():
+async def auth_login(request: Request):
     if not CLIENT_ID:
-        return RedirectResponse(url="/dashboard.html?error=oauth")
+        return RedirectResponse(url="/premium.html?error=oauth")
+    return_to = request.query_params.get("return_to", "")
     params = {
         "client_id": CLIENT_ID,
         "redirect_uri": REDIRECT_URI,
@@ -132,13 +133,16 @@ async def auth_login():
         "prompt": "none",
     }
     q = "&".join(f"{k}={v}" for k, v in params.items())
-    return RedirectResponse(url=f"{DISCORD_AUTH_URL}?{q}")
+    resp = RedirectResponse(url=f"{DISCORD_AUTH_URL}?{q}")
+    if return_to:
+        resp.set_cookie("lumi_return_to", return_to, max_age=300)
+    return resp
 
 
 @app.get("/auth/callback")
 async def auth_callback(code: str = "", error: str = ""):
     if error or not code or not CLIENT_ID:
-        return RedirectResponse(url="/dashboard.html?error=oauth")
+        return RedirectResponse(url="/premium.html?error=oauth")
     async with httpx.AsyncClient(timeout=15) as client:
         r = await client.post(
             DISCORD_TOKEN_URL,
@@ -152,14 +156,15 @@ async def auth_callback(code: str = "", error: str = ""):
             headers={"Content-Type": "application/x-www-form-urlencoded"},
         )
         if r.status_code != 200:
-            return RedirectResponse(url="/dashboard.html?error=oauth")
+            return RedirectResponse(url="/premium.html?error=oauth")
         token = r.json().get("access_token", "")
         user = await _discord_get(f"{DISCORD_API}/users/@me", token)
         if not user:
-            return RedirectResponse(url="/dashboard.html?error=oauth")
+            return RedirectResponse(url="/premium.html?error=oauth")
     record = db.register_or_login(int(user["id"]), user["username"], user.get("avatar"))
     sess = _new_session(user, token)
-    resp = RedirectResponse(url="/account.html?welcome=1" if record["is_new"] else "/dashboard.html")
+    target = "/account.html?welcome=1" if record["is_new"] else "/account.html"
+    resp = RedirectResponse(url=target)
     resp.set_cookie("lumi_token", sess, httponly=True, max_age=SESSION_TTL)
     return resp
 

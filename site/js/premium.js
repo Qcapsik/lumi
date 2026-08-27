@@ -13,7 +13,7 @@ async function api(path, opts = {}) {
     throw new Error("Бэкенд недоступен. Попробуйте позже.");
   }
   if (r.status === 401) {
-    window.location.href = "https://lumi-panel.onrender.com/auth/login";
+    window.location.href = "https://lumi-panel.onrender.com/auth/login?return_to=/premium.html";
     throw new Error("unauthorized");
   }
   if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || r.statusText);
