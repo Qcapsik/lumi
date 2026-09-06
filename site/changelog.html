@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Changelog — Lumi</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<header class="nav">
+  <div class="nav-inner">
+    <a class="logo" href="index.html" style="text-decoration:none"><span class="logo-dot"></span><span class="lu">LU</span><span class="mi">MI</span></a>
+    <nav>
+      <a href="index.html">Главная</a>
+      <a href="premium.html">Премиум</a>
+      <a href="account.html">Кабинет</a>
+    </nav>
+  </div>
+</header>
+
+<section class="section">
+  <h1>История изменений</h1>
+  <p class="section-sub">Все заметные изменения в боте и сайте</p>
+
+  <div style="max-width:800px;margin:0 auto">
+    <article style="margin-bottom:40px">
+      <header style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;padding-bottom:8px;border-bottom:1px solid var(--line)">
+        <h2 style="font-size:22px">v2.4.0 — 2026-08-26</h2>
+        <span style="background:var(--violet);color:#fff;padding:4px 12px;border-radius:999px;font-size:12px;font-weight:700">Major</span>
+      </header>
+      <ul style="line-height:1.8">
+        <li>💳 <b>Stripe Checkout</b> — реальные платежи во всех странах, webhook для гарантированной выдачи ключа</li>
+        <li>🛡 <b>Rate limiting</b> (slowapi) на все API эндпоинты</li>
+        <li>📝 <b>Логирование с ротацией</b> (RotatingFileHandler, 5 Мб × 5 файлов)</li>
+        <li>❤️ <b>Healthcheck</b> <code>/health</code> для мониторинга</li>
+        <li>📄 <b>Юридические страницы</b>: Terms, Privacy, Refund</li>
+        <li>🗺 <b>SEO</b>: sitemap.xml, robots.txt, Open Graph мета-теги</li>
+        <li>🔧 <b>Graceful shutdown</b> и lifespan в FastAPI</li>
+      </ul>
+    </article>
+
+    <article style="margin-bottom:40px">
+      <header style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;padding-bottom:8px;border-bottom:1px solid var(--line)">
+        <h2 style="font-size:22px">v2.3.0 — 2026-08-25</h2>
+        <span style="background:var(--blue);color:#fff;padding:4px 12px;border-radius:999px;font-size:12px;font-weight:700">Feature</span>
+      </header>
+      <ul style="line-height:1.8">
+        <li>💬 <b>ИИ-чат «Луми, ...»</b> для премиум (Claude Sonnet 5 + Pollinations fallback)</li>
+        <li>🏷 <b>Авто-роли по уровню</b> — настройка в панели, выдача при level up</li>
+        <li>🔑 <b>Универсальные ключи</b> (guild_id=0) — активация на любом сервере</li>
+        <li>🎨 <b>Новый дизайн</b>: LU синий, MI фиолетовый, частицы, glass-эффекты</li>
+        <li>🌐 <b>Сайт на Netlify</b> + API на Render</li>
+      </ul>
+    </article>
+
+    <article style="margin-bottom:40px">
+      <header style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;padding-bottom:8px;border-bottom:1px solid var(--line)">
+        <h2 style="font-size:22px">v2.2.0 — 2026-08-20</h2>
+        <span style="background:var(--green);color:#fff;padding:4px 12px;border-radius:999px;font-size:12px;font-weight:700">Feature</span>
+      </header>
+      <ul style="line-height:1.8">
+        <li>🏆 <b>Ачивки и профиль</b> — 19+ достижений, PNG-карточка, рамки</li>
+        <li>🐾 <b>Питомцы-тамагочи</b> — корми, глади, качай до легендарного</li>
+        <li>🎰 <b>Казино</b> — коин, кубик, рулетка, блекджек, дуэли</li>
+        <li>💰 <b>Экономика</b> — кредиты, магазин ролей, переводы, дневные бонусы</li>
+      </ul>
+    </article>
+
+    <article style="margin-bottom:40px">
+      <header style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;padding-bottom:8px;border-bottom:1px solid var(--line)">
+        <h2 style="font-size:22px">v2.1.0 — 2026-08-10</h2>
+        <span style="background:var(--violet);color:#fff;padding:4px 12px;border-radius:999px;font-size:12px;font-weight:700">Feature</span>
+      </header>
+      <ul style="line-height:1.8">
+        <li>🎵 <b>Музыка</b> — SoundCloud/YouTube поиск, живой плеер, прогресс-бар, избранное, плейлисты</li>
+        <li>🛡 <b>Модерация</b> — тикеты, опросы, викторины, анонимки, варны, авто-модерация</li>
+        <li>⚙️ <b>Кастомные команды</b> и приветствия с PNG-карточкой новичка</li>
+        <li>📊 <b>Статистика сервера</b> — !статсервера, QR-коды</li>
+      </ul>
+    </article>
+
+    <article style="margin-bottom:40px">
+      <header style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;padding-bottom:8px;border-bottom:1px solid var(--line)">
+        <h2 style="font-size:22px">v2.0.0 — 2026-08-01</h2>
+        <span style="background:#ef4444;color:#fff;padding:4px 12px;border-radius:999px;font-size:12px;font-weight:700">Release</span>
+      </header>
+      <ul style="line-height:1.8">
+        <li>🚀 Первый публичный релиз Lumi v2</li>
+        <li>Базовая архитектура: Discord.py + FastAPI + SQLite</li>
+        <li>OAuth2 авторизация через Discord</li>
+        <li>Премиум-система с генерацией ключей</li>
+      </ul>
+    </article>
+  </div>
+</section>
+
+<footer class="footer">
+  <div>© 2026 <b>Lumi</b> · создатели <b>Qcaps</b> & <b>lev4ak</b></div>
+  <div class="footer-links"><a href="index.html">Главная</a><a href="terms.html">Условия</a><a href="privacy.html">Приватность</a></div>
+</footer>
+</body>
+</html>

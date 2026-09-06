@@ -11,3 +11,4 @@ Pillow>=10.2.0
 qrcode>=7.4.2
 python-dateutil>=2.9.0
 stripe>=7.0.0
+slowapi>=0.1.9

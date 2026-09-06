@@ -5,16 +5,23 @@
 import os
 import secrets
 import time
+import logging
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
+from contextlib import asynccontextmanager
 
 import httpx
 import stripe
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 
 import database as db
+from mailer import enabled as mail_enabled, purchase_email, send_email
 
 load_dotenv(Path(__file__).parent / ".env")
 
@@ -28,6 +35,7 @@ REDIRECT_URI = os.getenv("PANEL_REDIRECT_URI", f"http://localhost:{PORT}/auth/ca
 BOT_TOKEN = os.getenv("DISCORD_TOKEN", "")
 
 STRIPE_SECRET = os.getenv("STRIPE_SECRET_KEY", "")
+STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
 STRIPE_PUBLISHABLE = os.getenv("STRIPE_PUBLISHABLE_KEY", "")
 DOMAIN = os.getenv("SITE_DOMAIN", f"http://localhost:{PORT}")
 
@@ -39,34 +47,122 @@ DISCORD_API = "https://discord.com/api"
 
 ADMIN_PERM = 0x8  # ADMINISTRATOR
 
-app = FastAPI(title="Lumi Panel", docs_url=None, redoc_url=None)
-
-# Тарифы: месяцы -> цена $
 PLANS = {1: 7.99, 3: 14.99}
 
-# Сессии: token -> {user_id, username, avatar, expires}
 SESSIONS: dict = {}
 SESSION_TTL = 24 * 3600
 
-db.init_db()
-db.create_promo("LumiAI", 10, 100000)  # Промокод LumiAI: −10%
+limiter = Limiter(key_func=get_remote_address)
+
+# ── Логирование ──────────────────────────────────────────────────────────────
+log_dir = BASE_DIR / "logs"
+log_dir.mkdir(exist_ok=True)
+handler = RotatingFileHandler(log_dir / "web.log", maxBytes=5_000_000, backupCount=5, encoding="utf-8")
+handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+logger = logging.getLogger("lumi-web")
+logger.setLevel(logging.INFO)
+logger.addHandler(handler)
+logging.getLogger("uvicorn.access").handlers = [handler]
 
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    db.init_db()
+    db.create_promo("LumiAI", 10, 100000)
+    logger.info("Starting Lumi web server")
+    yield
+    logger.info("Shutting down Lumi web server")
+
+
+app = FastAPI(title="Lumi Panel", docs_url=None, redoc_url=None, lifespan=lifespan)
+
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# ── Статика ──────────────────────────────────────────────────────────────────
+app.mount("/css", StaticFiles(directory=SITE_DIR / "css"), name="css")
+app.mount("/js", StaticFiles(directory=SITE_DIR / "js"), name="js")
+
+# ── Healthcheck ──────────────────────────────────────────────────────────────
+@app.get("/health")
+@limiter.exempt
+async def health():
+    return {"status": "ok", "service": "lumi-web"}
+
+# ── Страницы ─────────────────────────────────────────────────────────────────
+@app.get("/")
+async def index():
+    return FileResponse(SITE_DIR / "index.html")
+
+@app.get("/premium.html")
+async def premium():
+    return FileResponse(SITE_DIR / "premium.html")
+
+@app.get("/dashboard.html")
+async def dashboard():
+    return FileResponse(SITE_DIR / "dashboard.html")
+
+@app.get("/account.html")
+async def account():
+    return FileResponse(SITE_DIR / "account.html")
+
+@app.get("/terms.html")
+async def terms():
+    return FileResponse(SITE_DIR / "terms.html")
+
+@app.get("/privacy.html")
+async def privacy():
+    return FileResponse(SITE_DIR / "privacy.html")
+
+@app.get("/refund.html")
+async def refund():
+    return FileResponse(SITE_DIR / "refund.html")
+
+@app.get("/changelog.html")
+async def changelog():
+    return FileResponse(SITE_DIR / "changelog.html")
+
+# ── Rate-limited эндпоинты ───────────────────────────────────────────────────
+@app.get("/sitemap.xml")
+@limiter.limit("10/minute")
+async def sitemap(request: Request):
+    xml = f"""<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>{DOMAIN}/</loc><changefreq>weekly</changefreq><priority>1.0</priority></url>
+  <url><loc>{DOMAIN}/premium.html</loc><changefreq>monthly</changefreq><priority>0.8</priority></url>
+  <url><loc>{DOMAIN}/account.html</loc><changefreq>monthly</changefreq><priority>0.6</priority></url>
+  <url><loc>{DOMAIN}/terms.html</loc><changefreq>yearly</changefreq><priority>0.3</priority></url>
+  <url><loc>{DOMAIN}/privacy.html</loc><changefreq>yearly</changefreq><priority>0.3</priority></url>
+  <url><loc>{DOMAIN}/refund.html</loc><changefreq>yearly</changefreq><priority>0.3</priority></url>
+  <url><loc>{DOMAIN}/changelog.html</loc><changefreq>weekly</changefreq><priority>0.5</priority></url>
+</urlset>"""
+    return Response(content=xml, media_type="application/xml")
+
+@app.get("/robots.txt")
+@limiter.exempt
+async def robots():
+    txt = f"""User-agent: *
+Allow: /
+
+Sitemap: {DOMAIN}/sitemap.xml
+"""
+    return Response(content=txt, media_type="text/plain")
+
+# ── Авторизация ─────────────────────────────────────────────────────────────
 def _new_session(user: dict, access_token: str) -> str:
     token = secrets.token_hex(24)
     SESSIONS[token] = {
         "user_id": user["id"],
         "username": user["username"],
         "avatar": user.get("avatar"),
+        "email": user.get("email"),
         "access_token": access_token,
         "expires": time.time() + SESSION_TTL,
     }
     return token
 
-
 def _cookie_token(request: Request) -> str | None:
     return request.cookies.get("lumi_token")
-
 
 def _require_session(request: Request) -> dict:
     token = _cookie_token(request)
@@ -75,14 +171,12 @@ def _require_session(request: Request) -> dict:
         raise HTTPException(status_code=401, detail="Не авторизован")
     return s
 
-
 async def _discord_get(url: str, token: str) -> dict | list | None:
     async with httpx.AsyncClient(timeout=15) as client:
         r = await client.get(url, headers={"Authorization": f"Bearer {token}"})
         if r.status_code == 200:
             return r.json()
         return None
-
 
 async def _bot_get(url: str) -> dict | list | None:
     if not BOT_TOKEN:
@@ -93,33 +187,6 @@ async def _bot_get(url: str) -> dict | list | None:
             return r.json()
         return None
 
-
-@app.get("/")
-async def index():
-    return FileResponse(SITE_DIR / "index.html")
-
-
-@app.get("/premium.html")
-async def premium():
-    return FileResponse(SITE_DIR / "premium.html")
-
-
-@app.get("/dashboard.html")
-async def dashboard():
-    return FileResponse(SITE_DIR / "dashboard.html")
-
-
-@app.get("/account.html")
-async def account():
-    return FileResponse(SITE_DIR / "account.html")
-
-
-app.mount("/css", StaticFiles(directory=SITE_DIR / "css"), name="css")
-app.mount("/js", StaticFiles(directory=SITE_DIR / "js"), name="js")
-
-
-# ── Авторизация ─────────────────────────────────────────────────────────────
-
 @app.get("/auth/login")
 async def auth_login(request: Request):
     if not CLIENT_ID:
@@ -129,7 +196,7 @@ async def auth_login(request: Request):
         "client_id": CLIENT_ID,
         "redirect_uri": REDIRECT_URI,
         "response_type": "code",
-        "scope": "identify guilds",
+        "scope": "identify guilds email",
         "prompt": "none",
     }
     q = "&".join(f"{k}={v}" for k, v in params.items())
@@ -137,7 +204,6 @@ async def auth_login(request: Request):
     if return_to:
         resp.set_cookie("lumi_return_to", return_to, max_age=300)
     return resp
-
 
 @app.get("/auth/callback")
 async def auth_callback(code: str = "", error: str = ""):
@@ -168,7 +234,6 @@ async def auth_callback(code: str = "", error: str = ""):
     resp.set_cookie("lumi_token", sess, httponly=True, max_age=SESSION_TTL)
     return resp
 
-
 @app.get("/auth/logout")
 async def auth_logout(request: Request):
     token = _cookie_token(request)
@@ -178,10 +243,9 @@ async def auth_logout(request: Request):
     resp.delete_cookie("lumi_token")
     return resp
 
-
 # ── API ─────────────────────────────────────────────────────────────────────
-
 @app.get("/api/me")
+@limiter.limit("30/minute")
 async def api_me(request: Request):
     s = _require_session(request)
     rec = db.get_site_user(int(s["user_id"]))
@@ -193,18 +257,17 @@ async def api_me(request: Request):
         "last_login_at": (rec or {}).get("last_login_at"),
     }
 
-
 # ── Покупка премиума и ключи ────────────────────────────────────────────────
-
 @app.get("/api/promo/{code}")
+@limiter.limit("20/minute")
 async def api_promo(code: str):
     p = db.check_promo(code)
     if not p:
         raise HTTPException(status_code=404, detail="Промокод не найден")
     return {"code": p["code"], "percent": p["percent"]}
 
-
 @app.post("/api/premium/buy")
+@limiter.limit("10/minute")
 async def api_premium_buy(request: Request):
     s = _require_session(request)
     body = await request.json()
@@ -249,9 +312,9 @@ async def api_premium_buy(request: Request):
     )
     return {"url": session.url, "session_id": session.id}
 
-
 @app.get("/payment/success")
-async def payment_success(session_id: str = ""):
+@limiter.limit("20/minute")
+async def payment_success(request: Request, session_id: str = ""):
     if not session_id or not STRIPE_SECRET:
         return RedirectResponse(url="/premium.html?error=no_session")
 
@@ -275,6 +338,17 @@ async def payment_success(session_id: str = ""):
         db.add_account_key(user_id, license_code, months, amount, promo)
         if promo:
             db.use_promo(promo)
+        try:
+            tok = request.cookies.get("lumi_token", "")
+        except Exception:
+            tok = ""
+        email = (SESSIONS.get(tok or "") or {}).get("email") if tok else None
+        if email and mail_enabled():
+            try:
+                send_email(email, "Lumi Premium — твой ключ", purchase_email(license_code, months, amount))
+                logger.info(f"Purchase email sent to user {user_id}")
+            except Exception as e:
+                logger.warning(f"Email failed for user {user_id}: {e}")
 
     return HTMLResponse(f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>Lumi — Оплата прошла</title>
@@ -295,8 +369,44 @@ a:hover{{text-decoration:underline}}
 <a href="/account.html">Открыть кабинет →</a>
 </div></body></html>""")
 
+# ── Stripe Webhook ──────────────────────────────────────────────────────────
+@app.post("/stripe/webhook")
+@limiter.exempt
+async def stripe_webhook(request: Request):
+    payload = await request.body()
+    sig_header = request.headers.get("stripe-signature")
+    if not STRIPE_WEBHOOK_SECRET:
+        logger.warning("STRIPE_WEBHOOK_SECRET not set")
+        raise HTTPException(status_code=500, detail="Webhook not configured")
+    try:
+        event = stripe.Webhook.construct_event(payload, sig_header, STRIPE_WEBHOOK_SECRET)
+    except ValueError:
+        logger.error("Invalid payload")
+        raise HTTPException(status_code=400, detail="Invalid payload")
+    except stripe.error.SignatureVerificationError:
+        logger.error("Invalid signature")
+        raise HTTPException(status_code=400, detail="Invalid signature")
+
+    if event["type"] == "checkout.session.completed":
+        session = event["data"]["object"]
+        if session.get("payment_status") == "paid":
+            meta = session.get("metadata", {})
+            user_id = int(meta.get("user_id", 0))
+            months = int(meta.get("months", 1))
+            promo = meta.get("promo") or None
+            amount = float(meta.get("amount", 0))
+            if user_id:
+                days = months * 30
+                license_code = db.create_license(0, days, user_id)
+                db.add_account_key(user_id, license_code, months, amount, promo)
+                if promo:
+                    db.use_promo(promo)
+                logger.info(f"Webhook: created key {license_code} for user {user_id}")
+
+    return {"received": True}
 
 @app.get("/api/account/keys")
+@limiter.limit("30/minute")
 async def api_account_keys(request: Request):
     s = _require_session(request)
     keys = db.get_account_keys(int(s["user_id"]))
@@ -313,14 +423,13 @@ async def api_account_keys(request: Request):
         })
     return out
 
-
 @app.get("/api/premium/plans")
+@limiter.limit("30/minute")
 async def api_premium_plans():
     return [{"months": m, "price": p} for m, p in PLANS.items()]
 
-
+# ── Серверы и настройки ─────────────────────────────────────────────────────
 async def _user_admin_guilds(s: dict) -> list[dict]:
-    """Гильдии юзера, где он админ/владелец и бот в них есть."""
     user_guilds = await _discord_get(f"{DISCORD_API}/users/@me/guilds", s["access_token"])
     if not user_guilds:
         return []
@@ -332,14 +441,14 @@ async def _user_admin_guilds(s: dict) -> list[dict]:
             out.append({"id": int(g["id"]), "name": g["name"], "icon": g.get("icon")})
     return sorted(out, key=lambda x: x["name"].lower())
 
-
 @app.get("/api/servers")
+@limiter.limit("20/minute")
 async def api_servers(request: Request):
     s = _require_session(request)
     return await _user_admin_guilds(s)
 
-
 @app.get("/api/server/{gid}")
+@limiter.limit("30/minute")
 async def api_server(gid: int, request: Request):
     s = _require_session(request)
     await _check_admin(gid, s)
@@ -363,8 +472,8 @@ async def api_server(gid: int, request: Request):
         "level_roles": [{"level": r["level"], "role_id": r["role_id"]} for r in level_roles],
     }
 
-
 @app.get("/api/server/{gid}/assets")
+@limiter.limit("30/minute")
 async def api_server_assets(gid: int, request: Request):
     s = _require_session(request)
     await _check_admin(gid, s)
@@ -373,7 +482,7 @@ async def api_server_assets(gid: int, request: Request):
     out_channels = []
     if isinstance(channels, list):
         for c in channels:
-            if c.get("type") in (0, 5):  # text, announcement
+            if c.get("type") in (0, 5):
                 out_channels.append({"id": int(c["id"]), "name": c["name"]})
     out_roles = []
     if isinstance(roles, list):
@@ -382,8 +491,8 @@ async def api_server_assets(gid: int, request: Request):
                 out_roles.append({"id": int(r["id"]), "name": r["name"]})
     return {"channels": out_channels, "roles": out_roles}
 
-
 @app.post("/api/server/{gid}/save")
+@limiter.limit("10/minute")
 async def api_server_save(gid: int, request: Request):
     s = _require_session(request)
     await _check_admin(gid, s)
@@ -418,11 +527,9 @@ async def api_server_save(gid: int, request: Request):
                 continue
     return {"ok": True}
 
-
 def _clear_level_roles(gid: int):
     with db._conn() as con:
         con.execute("DELETE FROM level_roles WHERE guild_id = ?", (gid,))
-
 
 async def _check_admin(gid: int, s: dict):
     guilds = await _user_admin_guilds(s)
@@ -430,8 +537,6 @@ async def _check_admin(gid: int, s: dict):
     if gid not in ids:
         raise HTTPException(status_code=404, detail="Сервер не найден")
 
-
 if __name__ == "__main__":
     import uvicorn
-
     uvicorn.run(app, host="0.0.0.0", port=PORT, log_level="info")

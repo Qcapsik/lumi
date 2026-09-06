@@ -8,6 +8,7 @@ import time
 import random
 import asyncio
 import datetime
+from pathlib import Path
 
 import discord
 import psutil
@@ -2083,6 +2084,26 @@ async def on_message(message):
 
 
 if __name__ == "__main__":
+    import logging
+    import signal
+    from logging.handlers import RotatingFileHandler
+
+    _log_dir = Path("logs")
+    _log_dir.mkdir(exist_ok=True)
+    _h = RotatingFileHandler(_log_dir / "bot.log", maxBytes=5_000_000, backupCount=5, encoding="utf-8")
+    _h.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+    logging.getLogger("lumi-bot").addHandler(_h)
+    logging.getLogger("discord").addHandler(_h)
+
+    def _graceful(_signo, _frame):
+        print("⏹ Получен сигнал остановки, закрываю бота...")
+
+    try:
+        signal.signal(signal.SIGINT, _graceful)
+        signal.signal(signal.SIGTERM, _graceful)
+    except Exception:
+        pass
+
     if not DISCORD_TOKEN:
         print("❌ Укажи DISCORD_TOKEN в файле .env")
     else:

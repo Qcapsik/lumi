@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Политика приватности — Lumi</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<header class="nav">
+  <div class="nav-inner">
+    <a class="logo" href="index.html" style="text-decoration:none"><span class="logo-dot"></span><span class="lu">LU</span><span class="mi">MI</span></a>
+    <nav>
+      <a href="index.html">Главная</a>
+      <a href="premium.html">Премиум</a>
+      <a href="account.html">Кабинет</a>
+    </nav>
+  </div>
+</header>
+
+<section class="section">
+  <h1>Политика приватности</h1>
+  <p class="section-sub">Последнее обновление: 2026-08-26</p>
+
+  <div style="max-width:800px;margin:0 auto;line-height:1.7">
+    <h2>1. Какие данные собираем</h2>
+    <ul>
+      <li>Discord ID, username, avatar — при входе через OAuth2.</li>
+      <li>ID серверов, где вы админ и бот присутствует — для панели управления.</li>
+      <li>Лицензионные ключи, историю покупок, промокоды — для премиума.</li>
+      <li>IP-адрес, User-Agent — в логах безопасности (до 30 дней).</li>
+    </ul>
+
+    <h2>2. Для чего используем</h2>
+    <ul>
+      <li>Авторизация и идентификация в личном кабинете.</li>
+      <li>Выдача и проверка премиум-ключей.</li>
+      <li>Показ ваших серверов в панели управления.</li>
+      <li>Безопасность: защита от брутфорса, DDoS, фрода.</li>
+    </ul>
+
+    <h2>3. Передача третьим лицам</h2>
+    <p>Не передаём данные третьим лицам, кроме:</p>
+    <ul>
+      <li>Stripe — платёжные данные (мы не видим номер карты).</li>
+      <li>Discord API — для работы бота и OAuth.</li>
+      <li>По требованию закона / суда.</li>
+    </ul>
+
+    <h2>4. Хранение и удаление</h2>
+    <ul>
+      <li>Аккаунт и ключи — пока вы не удалите аккаунт (напишите в поддержку).</li>
+      <li>Логи безопасности — 30 дней, затем автоудаление.</li>
+      <li>Платёжные данные — у Stripe по их политике.</li>
+    </ul>
+
+    <h2>4. Ваши права (GDPR / 152-ФЗ)</h2>
+    <ul>
+      <li>Доступ к данным — напишите в поддержку, вышлем JSON.</li>
+      <li>Удаление аккаунта — полная стирания за 30 дней.</li>
+      <li>Ограничение обработки — отказ от аналитики.</li>
+    </ul>
+
+    <h2>5. Cookies</h2>
+    <p>Только <code>lumi_token</code> (HttpOnly, Secure, SameSite=Lax) — сессия авторизации. Трекинг-куки не используем.</p>
+
+    <h2>6. Безопасность</h2>
+    <p>HTTPS везде, токены в HttpOnly куках, rate limiting, валидация вебхуков Stripe, параметризованные SQL-запросы.</p>
+
+    <h2>7. Контакты</h2>
+    <p>DPO / вопросы по данным: Discord-сервер поддержки.</p>
+  </div>
+</section>
+
+<footer class="footer">
+  <div>© 2026 <b>Lumi</b> · создатели <b>Qcaps</b> & <b>lev4ak</b></div>
+  <div class="footer-links"><a href="index.html">Главная</a><a href="terms.html">Условия</a><a href="refund.html">Возврат</a></div>
+</footer>
+</body>
+</html>
