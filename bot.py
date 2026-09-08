@@ -1126,14 +1126,20 @@ async def activate_cmd(ctx, code: str = None):
         return
     days = int(lic["days"])
     until = int(_t.time()) + days * 86400
-    db.add_premium(ctx.guild.id, ctx.author.id, until)
+    if int(lic["guild_id"]) == 0:
+        # Личный ключ: привязывается к Discord ID покупателя, работает на любом сервере с Луми.
+        db.add_premium(0, ctx.author.id, until)
+        scope = "личный — работает на любом сервере с Луми, только у тебя"
+    else:
+        db.add_premium(ctx.guild.id, ctx.author.id, until)
+        scope = "привязан к этому серверу"
     db.delete_license(lic["code"])
     await _check_stock_alert()
     from datetime import datetime
     date = datetime.fromtimestamp(until).strftime("%d.%m.%Y")
     embed = discord.Embed(
         title="👑 Премиум активирован!",
-        description=f"Твой премиум активен до **{date}**.\n2× XP, 2× бонус `!день`, 👑 в профиле, приоритет в музыке.",
+        description=f"Твой премиум активен до **{date}** ({scope}).\n2× XP, 2× бонус `!день`, 👑 в профиле, приоритет в музыке, ИИ-чат `Луми, ...`",
         color=discord.Color.gold(),
     )
     await ctx.send(embed=embed)
@@ -1144,8 +1150,8 @@ async def limit_cmd(ctx):
     if not db.is_premium(ctx.guild.id, ctx.author.id):
         await ctx.send("👑 Лимит ИИ доступен только с премиумом. Активируй ключ: `!активировать LU-XXXX-XXXX`")
         return
-    used = db.get_ai_usage(ctx.guild.id, ctx.author.id)
-    await ctx.send(f"🤖 ИИ-запросы сегодня: **{used}/{AI_DAILY_LIMIT}** использовано, осталось **{max(AI_DAILY_LIMIT - used, 0)}**.")
+    used = db.get_ai_usage(0, ctx.author.id)
+    await ctx.send(f"🤖 ИИ-запросы сегодня: **{used}/{AI_DAILY_LIMIT}** использовано, осталось **{max(AI_DAILY_LIMIT - used, 0)}** (лимит общий на все серверы).")
 
 
 LOW_STOCK_THRESHOLD = int(os.getenv("LOW_STOCK_THRESHOLD", "5"))
@@ -2039,7 +2045,7 @@ async def on_message(message):
         if not prompt:
             await message.reply("Пример: `Луми, расскажи анекдот`")
             return
-        used = db.get_ai_usage(message.guild.id, message.author.id)
+        used = db.get_ai_usage(0, message.author.id)
         if used >= AI_DAILY_LIMIT:
             await message.reply(
                 f"⏳ Дневной лимит ИИ исчерпан ({AI_DAILY_LIMIT}/{AI_DAILY_LIMIT}). "
@@ -2053,7 +2059,7 @@ async def on_message(message):
             except RuntimeError as e:
                 await message.reply(f"⚠️ {e}")
                 return
-        left = AI_DAILY_LIMIT - db.inc_ai_usage(message.guild.id, message.author.id)
+        left = AI_DAILY_LIMIT - db.inc_ai_usage(0, message.author.id)
         tail = f"\n\n🤖 Осталось ИИ-запросов сегодня: **{max(left, 0)}**"
         if len(text) + len(tail) <= 1900:
             await message.reply(text + tail)

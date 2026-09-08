@@ -1255,7 +1255,11 @@ def premium_until(guild_id: int, member_id: int) -> int:
 
 def is_premium(guild_id: int, member_id: int) -> bool:
     import time as _t
-    return premium_until(guild_id, member_id) > int(_t.time())
+    now = int(_t.time())
+    # Личный (роуминг) премиум: guild_id=0 действует на любом сервере, но только у владельца.
+    if premium_until(0, member_id) > now:
+        return True
+    return premium_until(guild_id, member_id) > now
 
 
 # ── Промокоды и покупки ─────────────────────────────────────────────────────
