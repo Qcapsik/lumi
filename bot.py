@@ -1698,7 +1698,6 @@ async def status_loop():
                 (discord.ActivityType.playing, "🎵 Музыка без лимитов | !помощь"),
                 (discord.ActivityType.listening, "Луми, ... — ИИ-чат 👑"),
                 (discord.ActivityType.watching, f"{n} {word} • 60+ команд"),
-                (discord.ActivityType.competing, "👑 Premium от 499₽"),
             ]
             atype, name = statuses[i % len(statuses)]
             i += 1
