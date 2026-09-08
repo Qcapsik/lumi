@@ -1190,6 +1190,20 @@ def delete_license(code: str) -> bool:
         return cur.rowcount > 0
 
 
+def count_licenses() -> int:
+    with _conn() as con:
+        row = con.execute("SELECT COUNT(*) AS c FROM licenses").fetchone()
+        return int(row["c"]) if row else 0
+
+
+def count_licenses_by_days() -> list:
+    with _conn() as con:
+        rows = con.execute(
+            "SELECT days, COUNT(*) AS c FROM licenses GROUP BY days ORDER BY days"
+        ).fetchall()
+        return [{"days": r["days"], "count": r["c"]} for r in rows]
+
+
 def _today() -> str:
     return datetime.utcnow().date().isoformat()
 

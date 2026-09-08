@@ -1128,6 +1128,7 @@ async def activate_cmd(ctx, code: str = None):
     until = int(_t.time()) + days * 86400
     db.add_premium(ctx.guild.id, ctx.author.id, until)
     db.delete_license(lic["code"])
+    await _check_stock_alert()
     from datetime import datetime
     date = datetime.fromtimestamp(until).strftime("%d.%m.%Y")
     embed = discord.Embed(
@@ -1145,6 +1146,73 @@ async def limit_cmd(ctx):
         return
     used = db.get_ai_usage(ctx.guild.id, ctx.author.id)
     await ctx.send(f"🤖 ИИ-запросы сегодня: **{used}/{AI_DAILY_LIMIT}** использовано, осталось **{max(AI_DAILY_LIMIT - used, 0)}**.")
+
+
+LOW_STOCK_THRESHOLD = int(os.getenv("LOW_STOCK_THRESHOLD", "5"))
+
+
+async def _check_stock_alert():
+    """DM владельцам, если ключей на складе мало."""
+    try:
+        if db.count_licenses() >= LOW_STOCK_THRESHOLD:
+            return
+        text = (
+            f"⚠️ Сток ключей заканчивается: осталось **{db.count_licenses()}** "
+            f"(порог {LOW_STOCK_THRESHOLD}). Сгенерируй пачку: `!пачка 30 15`"
+        )
+        for oid in OWNER_IDS:
+            try:
+                u = await bot.fetch_user(int(oid))
+                await u.send(text)
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+
+@bot.command(name="сток", aliases=["stock", "склад"])
+async def stock_cmd(ctx):
+    if ctx.author.id not in OWNER_IDS:
+        return
+    rows = db.count_licenses_by_days()
+    total = sum(r["count"] for r in rows)
+    if not rows:
+        await ctx.send("📦 Склад пуст (0 ключей). Сгенерируй: `!пачка 30 15`")
+        return
+    lines = [f"• {r['days']} дн. — **{r['count']}** шт." for r in rows]
+    await ctx.send(f"📦 Склад ключей: **{total}** шт.\n" + "\n".join(lines))
+
+
+@bot.command(name="пачка", aliases=["pack", "пачка_ключей"])
+async def pack_cmd(ctx, days: int = 30, n: int = 10):
+    if ctx.author.id not in OWNER_IDS:
+        return
+    if not 1 <= days <= 3650:
+        await ctx.send("❌ Срок: от 1 до 3650 дней. Пример: `!пачка 30 15`")
+        return
+    if not 1 <= n <= 50:
+        await ctx.send("❌ Количество: от 1 до 50 за раз. Пример: `!пачка 30 15`")
+        return
+    codes = [db.create_license(0, days, ctx.author.id) for _ in range(n)]
+    packs_dir = Path("packs")
+    packs_dir.mkdir(exist_ok=True)
+    fname = packs_dir / f"funpay_{days}d_{n}_{int(time.time())}.txt"
+    fname.write_text(
+        f"LUMI keys — {days} days x {n} (universal, guild_id=0)\n\n" + "\n".join(codes) + "\n",
+        encoding="utf-8",
+    )
+    try:
+        await ctx.author.send(
+            f"📦 Пачка готова: **{n}** шт. × **{days}** дн. (универсальные). Файл ниже — заливай в FunPay как автовыдачу.",
+            file=discord.File(str(fname)),
+        )
+        await ctx.send("✅ Пачка отправлена тебе в ЛС.")
+    except discord.Forbidden:
+        await ctx.send("⚠️ Не смог написать в ЛС — открой личку и повтори.")
+        try:
+            fname.unlink()
+        except Exception:
+            pass
 
 
 # ── Рамки профиля ────────────────────────────────────────────────────────────
@@ -1875,6 +1943,7 @@ async def on_ready():
     bot.loop.create_task(weekly_digest_loop())
     bot.loop.create_task(voice_flush_loop())
     bot.loop.create_task(status_loop())
+    bot.loop.create_task(_check_stock_alert())
     print(f"🔥 Луми запущена | серверов: {len(bot.guilds)} | инструментов: {len(tools_map)}")
 
 
