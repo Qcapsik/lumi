@@ -316,6 +316,14 @@ def init_db():
                 registered_at TEXT,
                 last_login_at TEXT
             );
+
+            CREATE TABLE IF NOT EXISTS ai_usage (
+                guild_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                day TEXT NOT NULL,
+                count INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (guild_id, user_id, day)
+            );
             """
         )
         try:
@@ -1180,6 +1188,34 @@ def delete_license(code: str) -> bool:
     with _conn() as con:
         cur = con.execute("DELETE FROM licenses WHERE code = ?", (code.strip().upper(),))
         return cur.rowcount > 0
+
+
+def _today() -> str:
+    return datetime.utcnow().date().isoformat()
+
+
+def get_ai_usage(guild_id: int, user_id: int) -> int:
+    with _conn() as con:
+        row = con.execute(
+            "SELECT count FROM ai_usage WHERE guild_id = ? AND user_id = ? AND day = ?",
+            (guild_id, user_id, _today()),
+        ).fetchone()
+        return int(row["count"]) if row else 0
+
+
+def inc_ai_usage(guild_id: int, user_id: int) -> int:
+    day = _today()
+    with _conn() as con:
+        con.execute(
+            "INSERT INTO ai_usage (guild_id, user_id, day, count) VALUES (?, ?, ?, 1) "
+            "ON CONFLICT(guild_id, user_id, day) DO UPDATE SET count = count + 1",
+            (guild_id, user_id, day),
+        )
+        row = con.execute(
+            "SELECT count FROM ai_usage WHERE guild_id = ? AND user_id = ? AND day = ?",
+            (guild_id, user_id, day),
+        ).fetchone()
+        return int(row["count"]) if row else 1
 
 
 def add_premium(guild_id: int, member_id: int, until_ts: int):

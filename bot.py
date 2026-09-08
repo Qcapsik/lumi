@@ -28,6 +28,7 @@ DISCORD_TOKEN = os.getenv("DISCORD_TOKEN", "")
 CLAUDE_API_KEY = os.getenv("CLAUDE_API_KEY", "")
 BASE_URL = os.getenv("BASE_URL", "https://api.east-api-3.org/v1")
 AI_MODEL = os.getenv("AI_MODEL", "claude-3-5-sonnet")
+AI_DAILY_LIMIT = int(os.getenv("AI_DAILY_LIMIT", "30"))
 
 OWNER_IDS = [
     int(x.strip())
@@ -1137,6 +1138,15 @@ async def activate_cmd(ctx, code: str = None):
     await ctx.send(embed=embed)
 
 
+@bot.command(name="лимит", aliases=["limit", "остаток"])
+async def limit_cmd(ctx):
+    if not db.is_premium(ctx.guild.id, ctx.author.id):
+        await ctx.send("👑 Лимит ИИ доступен только с премиумом. Активируй ключ: `!активировать LU-XXXX-XXXX`")
+        return
+    used = db.get_ai_usage(ctx.guild.id, ctx.author.id)
+    await ctx.send(f"🤖 ИИ-запросы сегодня: **{used}/{AI_DAILY_LIMIT}** использовано, осталось **{max(AI_DAILY_LIMIT - used, 0)}**.")
+
+
 # ── Рамки профиля ────────────────────────────────────────────────────────────
 
 FRAMES = {
@@ -1944,6 +1954,13 @@ async def on_message(message):
         if not prompt:
             await message.reply("Пример: `Луми, расскажи анекдот`")
             return
+        used = db.get_ai_usage(message.guild.id, message.author.id)
+        if used >= AI_DAILY_LIMIT:
+            await message.reply(
+                f"⏳ Дневной лимит ИИ исчерпан ({AI_DAILY_LIMIT}/{AI_DAILY_LIMIT}). "
+                "Лимит обновится завтра. Остались вопросы — пиши админу сервера."
+            )
+            return
         async with message.channel.typing():
             try:
                 result = await lumi_chat(prompt)
@@ -1951,12 +1968,15 @@ async def on_message(message):
             except RuntimeError as e:
                 await message.reply(f"⚠️ {e}")
                 return
-        if len(text) <= 1900:
-            await message.reply(text)
+        left = AI_DAILY_LIMIT - db.inc_ai_usage(message.guild.id, message.author.id)
+        tail = f"\n\n🤖 Осталось ИИ-запросов сегодня: **{max(left, 0)}**"
+        if len(text) + len(tail) <= 1900:
+            await message.reply(text + tail)
         else:
             await message.reply(text[:1900])
             for i in range(1900, len(text), 1900):
                 await message.channel.send(text[i:i + 1900])
+            await message.channel.send(f"🤖 Осталось ИИ-запросов сегодня: **{max(left, 0)}**")
         return
 
     # ── Уровни / XP ──
