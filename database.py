@@ -330,6 +330,19 @@ def init_db():
             con.execute("ALTER TABLE welcome_config ADD COLUMN card_enabled INTEGER DEFAULT 1")
         except sqlite3.OperationalError:
             pass
+        for _ddl in (
+            "ALTER TABLE licenses ADD COLUMN status TEXT DEFAULT 'CREATED'",
+            "ALTER TABLE licenses ADD COLUMN hours INTEGER DEFAULT 0",
+            "ALTER TABLE licenses ADD COLUMN bound_user_id INTEGER",
+            "ALTER TABLE licenses ADD COLUMN bound_guild_id INTEGER",
+            "ALTER TABLE licenses ADD COLUMN activated_at TEXT",
+            "ALTER TABLE licenses ADD COLUMN expires_at INTEGER DEFAULT 0",
+        ):
+            try:
+                con.execute(_ddl)
+            except sqlite3.OperationalError:
+                pass
+        con.execute("UPDATE licenses SET status='CREATED' WHERE status IS NULL")
 
 
 def _now() -> str:
@@ -1161,19 +1174,102 @@ def remove_level_role(guild_id: int, level: int) -> bool:
 
 # ── Лицензии и премиум ──────────────────────────────────────────────────────
 
-def create_license(guild_id: int, days: int, created_by: int) -> str:
+def create_license(guild_id: int, days: int, created_by: int, hours: int = 0) -> str:
     import random, string
     while True:
         code = "LU-" + "".join(random.choices(string.ascii_uppercase + string.digits, k=4)) + "-" + "".join(random.choices(string.ascii_uppercase + string.digits, k=4))
         with _conn() as con:
             try:
                 con.execute(
-                    "INSERT INTO licenses (code, guild_id, days, created_by, created_at) VALUES (?, ?, ?, ?, ?)",
-                    (code, guild_id, int(days), created_by, _now()),
+                    "INSERT INTO licenses (code, guild_id, days, hours, status, created_by, created_at) VALUES (?, ?, ?, ?, 'CREATED', ?, ?)",
+                    (code, int(guild_id), int(days), int(hours), int(created_by), _now()),
                 )
                 return code
             except sqlite3.IntegrityError:
                 continue
+
+
+def activate_license(code: str, user_id: int, guild_id: int) -> dict:
+    """Атомарная активация: одна транзакция, побеждает один запрос (защита от гонки)."""
+    import time as _t
+    code = (code or "").strip().upper()
+    now = int(_t.time())
+    with _conn() as con:
+        row = con.execute("SELECT * FROM licenses WHERE code = ?", (code,)).fetchone()
+        if not row:
+            return {"ok": False, "reason": "not_found"}
+        lic = dict(row)
+        status = lic.get("status") or "CREATED"
+        if status == "REVOKED":
+            return {"ok": False, "reason": "revoked"}
+        if status != "CREATED":
+            return {"ok": False, "reason": "already_used"}
+        lg = int(lic.get("guild_id") or 0)
+        if lg not in (0, int(guild_id)):
+            return {"ok": False, "reason": "wrong_server"}
+        days = int(lic.get("days") or 0)
+        hours = int(lic.get("hours") or 0)
+        duration = hours * 3600 if hours > 0 else days * 86400
+        if duration <= 0:
+            return {"ok": False, "reason": "bad_duration"}
+        until = now + duration
+        scope_guild = 0 if lg == 0 else int(guild_id)
+        cur = con.execute(
+            "UPDATE licenses SET status='ACTIVE', bound_user_id=?, bound_guild_id=?, "
+            "activated_at=?, expires_at=? WHERE code=? AND status='CREATED'",
+            (int(user_id), scope_guild, _now(), until, code),
+        )
+        if cur.rowcount != 1:
+            return {"ok": False, "reason": "race_lost"}
+        con.execute(
+            "INSERT INTO premium_users (guild_id, member_id, until_ts) VALUES (?, ?, ?) "
+            "ON CONFLICT(guild_id, member_id) DO UPDATE SET until_ts = MAX(until_ts, excluded.until_ts)",
+            (scope_guild, int(user_id), until),
+        )
+        return {"ok": True, "days": days, "hours": hours, "until": until,
+                "personal": scope_guild == 0}
+
+
+def revoke_license(code: str) -> dict:
+    """Мгновенный отзыв лицензии владельцем бота."""
+    code = (code or "").strip().upper()
+    with _conn() as con:
+        row = con.execute("SELECT * FROM licenses WHERE code = ?", (code,)).fetchone()
+        if not row:
+            return {"ok": False, "reason": "not_found"}
+        lic = dict(row)
+        status = lic.get("status") or "CREATED"
+        if status == "REVOKED":
+            return {"ok": False, "reason": "already_revoked"}
+        con.execute("UPDATE licenses SET status='REVOKED' WHERE code = ?", (code,))
+        removed = 0
+        if status == "ACTIVE" and lic.get("bound_user_id"):
+            scope = int(lic.get("bound_guild_id") or 0)
+            cur = con.execute(
+                "DELETE FROM premium_users WHERE guild_id=? AND member_id=?",
+                (scope, int(lic["bound_user_id"])),
+            )
+            removed = cur.rowcount
+        return {"ok": True, "was": status, "removed_premium": removed,
+                "bound_user_id": lic.get("bound_user_id")}
+
+
+def license_audit(code: str) -> dict | None:
+    """Аудит лицензии: CREATED/ACTIVE/EXPIRED/REVOKED + привязки. История никогда не удаляется."""
+    import time as _t
+    with _conn() as con:
+        row = con.execute(
+            "SELECT * FROM licenses WHERE code = ?", ((code or "").strip().upper(),)
+        ).fetchone()
+        if not row:
+            return None
+        d = dict(row)
+        st = d.get("status") or "CREATED"
+        if st == "ACTIVE" and int(d.get("expires_at") or 0) <= int(_t.time()):
+            d["display"] = "EXPIRED"
+        else:
+            d["display"] = st
+        return d
 
 
 def get_license(code: str) -> dict | None:
@@ -1192,16 +1288,17 @@ def delete_license(code: str) -> bool:
 
 def count_licenses() -> int:
     with _conn() as con:
-        row = con.execute("SELECT COUNT(*) AS c FROM licenses").fetchone()
+        row = con.execute("SELECT COUNT(*) AS c FROM licenses WHERE status='CREATED'").fetchone()
         return int(row["c"]) if row else 0
 
 
 def count_licenses_by_days() -> list:
     with _conn() as con:
         rows = con.execute(
-            "SELECT days, COUNT(*) AS c FROM licenses GROUP BY days ORDER BY days"
+            "SELECT days, hours, COUNT(*) AS c FROM licenses "
+            "WHERE status='CREATED' GROUP BY days, hours ORDER BY days, hours"
         ).fetchall()
-        return [{"days": r["days"], "count": r["c"]} for r in rows]
+        return [{"days": r["days"], "hours": r["hours"], "count": r["c"]} for r in rows]
 
 
 def _today() -> str:

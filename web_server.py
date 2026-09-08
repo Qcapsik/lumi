@@ -419,7 +419,7 @@ async def api_account_keys(request: Request):
             "amount": k["amount"],
             "promo": k["promo"],
             "purchased_at": k["purchased_at"],
-            "activated": lic is None,
+            "activated": (lic is None) or ((lic.get("status") or "CREATED") != "CREATED"),
         })
     return out
 

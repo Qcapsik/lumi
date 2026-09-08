@@ -8,6 +8,7 @@ import time
 import random
 import asyncio
 import datetime
+from collections import defaultdict, deque
 from pathlib import Path
 
 import discord
@@ -1090,17 +1091,19 @@ async def credits_cmd(ctx, member: discord.Member, amount: int = 0):
 # ── Премиум и лицензии ───────────────────────────────────────────────────────
 
 @bot.command(name="генкод", aliases=["gencode", "лицензия"])
-async def gen_code_cmd(ctx, days: int = 30):
+async def gen_code_cmd(ctx, duration: str = "30"):
     if not _is_owner_or_admin(ctx):
         await ctx.send("❌ Создавать коды может только владелец сервера или администратор.")
         return
-    if not 1 <= days <= 3650:
-        await ctx.send("❌ Срок от 1 до 3650 дней.")
+    parsed = _parse_duration(duration)
+    if not parsed:
+        await ctx.send("❌ Формат срока: дни (`30`, `30d`) или часы (`12h`). Пример: `!генкод 12h`")
         return
-    code = db.create_license(ctx.guild.id, days, ctx.author.id)
+    days, hours = parsed
+    code = db.create_license(ctx.guild.id, days, ctx.author.id, hours)
     embed = discord.Embed(
         title="👑 Код премиума создан",
-        description=f"Код: **`{code}`**\nСрок: **{days} дн.**",
+        description=f"Код: **`{code}`**\nСрок: **{_dur_label(days, hours)}** (серверный)",
         color=discord.Color.gold(),
     )
     try:
@@ -1113,36 +1116,73 @@ async def gen_code_cmd(ctx, days: int = 30):
 
 @bot.command(name="активировать", aliases=["activate", "код"])
 async def activate_cmd(ctx, code: str = None):
-    import time as _t
     if not code:
         await ctx.send("❌ Формат: `!активировать LU-XXXX-XXXX`")
         return
-    lic = db.get_license(code)
-    if not lic:
-        await ctx.send("❌ Код не найден или уже использован.")
+    # Атомарная активация в одной транзакции: ключ → user_id, перепривязка запрещена.
+    r = db.activate_license(code, ctx.author.id, ctx.guild.id)
+    if not r["ok"]:
+        await ctx.send({
+            "not_found": "❌ Код не найден.",
+            "revoked": "❌ Код отозван владельцем бота.",
+            "already_used": "❌ Код уже использован.",
+            "race_lost": "❌ Код уже использован.",
+            "wrong_server": "❌ Этот код создан для другого сервера.",
+            "bad_duration": "❌ У кода некорректный срок. Напиши владельцу бота.",
+        }.get(r["reason"], "❌ Не удалось активировать код."))
         return
-    if lic["guild_id"] not in (0, ctx.guild.id):
-        await ctx.send("❌ Этот код создан для другого сервера.")
-        return
-    days = int(lic["days"])
-    until = int(_t.time()) + days * 86400
-    if int(lic["guild_id"]) == 0:
-        # Личный ключ: привязывается к Discord ID покупателя, работает на любом сервере с Луми.
-        db.add_premium(0, ctx.author.id, until)
-        scope = "личный — работает на любом сервере с Луми, только у тебя"
-    else:
-        db.add_premium(ctx.guild.id, ctx.author.id, until)
-        scope = "привязан к этому серверу"
-    db.delete_license(lic["code"])
     await _check_stock_alert()
     from datetime import datetime
-    date = datetime.fromtimestamp(until).strftime("%d.%m.%Y")
+    date = datetime.fromtimestamp(r["until"]).strftime("%d.%m.%Y %H:%M")
+    scope = ("личный — работает на любом сервере с Луми, только у тебя"
+             if r["personal"] else "привязан к этому серверу")
     embed = discord.Embed(
         title="👑 Премиум активирован!",
-        description=f"Твой премиум активен до **{date}** ({scope}).\n2× XP, 2× бонус `!день`, 👑 в профиле, приоритет в музыке, ИИ-чат `Луми, ...`",
+        description=f"Привязка: **твой Discord ID** ({scope}).\nАктивен до **{date}**.\n2× XP, 2× бонус `!день`, 👑 в профиле, приоритет в музыке, ИИ-чат `Луми, ...`",
         color=discord.Color.gold(),
     )
     await ctx.send(embed=embed)
+
+
+@bot.command(name="revoke", aliases=["revoke_key", "отозвать"])
+async def revoke_cmd(ctx, code: str = None):
+    """Мгновенный отзыв лицензии владельцем бота."""
+    if ctx.author.id not in OWNER_IDS:
+        return
+    if not code:
+        await ctx.send("❌ Формат: `!revoke LU-XXXX-XXXX`")
+        return
+    r = db.revoke_license(code)
+    if not r["ok"]:
+        await ctx.send({"not_found": "❌ Код не найден.",
+                        "already_revoked": "⚠️ Код уже отозван."}.get(r["reason"], "❌ Ошибка."))
+        return
+    await ctx.send(f"✅ Код `{code.strip().upper()}` отозван (был: {r['was']}). "
+                   f"Снято премиум-записей: {r['removed_premium']}.")
+
+
+@bot.command(name="чек", aliases=["checkkey", "аудит"])
+async def checkkey_cmd(ctx, code: str = None):
+    """Аудит лицензии: состояние, привязки, сроки."""
+    if ctx.author.id not in OWNER_IDS:
+        return
+    if not code:
+        await ctx.send("❌ Формат: `!чек LU-XXXX-XXXX`")
+        return
+    a = db.license_audit(code)
+    if not a:
+        await ctx.send("❌ Код не найден.")
+        return
+    from datetime import datetime
+    exp = datetime.fromtimestamp(int(a.get("expires_at") or 0)).strftime("%d.%m.%Y %H:%M") if a.get("expires_at") else "—"
+    state_emoji = {"CREATED": "🆕", "ACTIVE": "✅", "EXPIRED": "⌛", "REVOKED": "⛔"}.get(a["display"], "❔")
+    await ctx.send(
+        f"{state_emoji} `{a['code']}` — **{a['display']}**\n"
+        f"Срок: {_dur_label(int(a.get('days') or 0), int(a.get('hours') or 0))} · "
+        f"тип: {'личный' if int(a.get('guild_id') or 0) == 0 else 'серверный'}\n"
+        f"Владелец: {('<@' + str(a['bound_user_id']) + '>') if a.get('bound_user_id') else '—'} · "
+        f"истекает: {exp}"
+    )
 
 
 @bot.command(name="лимит", aliases=["limit", "остаток"])
@@ -1155,6 +1195,68 @@ async def limit_cmd(ctx):
 
 
 LOW_STOCK_THRESHOLD = int(os.getenv("LOW_STOCK_THRESHOLD", "5"))
+
+
+# ── Единый гейт авторизации (п.10 ТЗ): лицензия → срок → права Discord → лимиты ──
+_CMD_HITS: dict[int, deque] = defaultdict(deque)
+_CMD_WARNED: dict[int, float] = {}
+CMD_RATE_N = 5
+CMD_RATE_WINDOW = 10.0
+
+
+def _rate_ok(user_id: int) -> bool:
+    now = time.time()
+    dq = _CMD_HITS[user_id]
+    while dq and now - dq[0] > CMD_RATE_WINDOW:
+        dq.popleft()
+    if len(dq) >= CMD_RATE_N:
+        return False
+    dq.append(now)
+    return True
+
+
+def authorize(*, user_id: int, guild_id: int, member=None, feature: str = "premium",
+              require_mod: bool = False, check_rate: bool = False) -> tuple[bool, str]:
+    """Общая проверка для защищённых функций. Возвращает (ok, reason)."""
+    if not db.is_premium(guild_id, user_id):
+        return False, "no_license"
+    if require_mod:
+        if member is None:
+            return False, "no_perm"
+        perms = getattr(member, "guild_permissions", None)
+        is_owner = getattr(member, "id", None) == getattr(getattr(member, "guild", None), "owner_id", None)
+        if not (is_owner or (perms and perms.administrator)):
+            return False, "no_perm"
+    if feature == "ai":
+        if db.get_ai_usage(0, user_id) >= AI_DAILY_LIMIT:
+            return False, "ai_limit"
+    if check_rate and not _rate_ok(user_id):
+        return False, "rate"
+    return True, "ok"
+
+
+def _parse_duration(arg) -> tuple[int, int] | None:
+    """'30'/'30d' -> (30, 0); '12h' -> (0, 12)."""
+    if isinstance(arg, int):
+        return (arg, 0) if 1 <= arg <= 3650 else None
+    s = str(arg or "").strip().lower()
+    if s.endswith("h"):
+        try:
+            h = int(s[:-1])
+        except ValueError:
+            return None
+        return (0, h) if 1 <= h <= 87600 else None
+    if s.endswith("d"):
+        s = s[:-1]
+    try:
+        d = int(s)
+    except ValueError:
+        return None
+    return (d, 0) if 1 <= d <= 3650 else None
+
+
+def _dur_label(days: int, hours: int) -> str:
+    return f"{hours}ч" if hours > 0 else f"{days} дн."
 
 
 async def _check_stock_alert():
@@ -1185,31 +1287,34 @@ async def stock_cmd(ctx):
     if not rows:
         await ctx.send("📦 Склад пуст (0 ключей). Сгенерируй: `!пачка 30 15`")
         return
-    lines = [f"• {r['days']} дн. — **{r['count']}** шт." for r in rows]
-    await ctx.send(f"📦 Склад ключей: **{total}** шт.\n" + "\n".join(lines))
+    lines = [f"• {_dur_label(int(r['days']), int(r['hours']))} — **{r['count']}** шт." for r in rows]
+    await ctx.send(f"📦 Склад ключей (только CREATED): **{total}** шт.\n" + "\n".join(lines))
 
 
 @bot.command(name="пачка", aliases=["pack", "пачка_ключей"])
-async def pack_cmd(ctx, days: int = 30, n: int = 10):
+async def pack_cmd(ctx, duration: str = "30", n: int = 10):
     if ctx.author.id not in OWNER_IDS:
         return
-    if not 1 <= days <= 3650:
-        await ctx.send("❌ Срок: от 1 до 3650 дней. Пример: `!пачка 30 15`")
+    parsed = _parse_duration(duration)
+    if not parsed:
+        await ctx.send("❌ Формат срока: дни (`30`, `30d`) или часы (`12h`). Пример: `!пачка 30 15` или `!пачка 12h 20`")
         return
+    days, hours = parsed
     if not 1 <= n <= 50:
         await ctx.send("❌ Количество: от 1 до 50 за раз. Пример: `!пачка 30 15`")
         return
-    codes = [db.create_license(0, days, ctx.author.id) for _ in range(n)]
+    codes = [db.create_license(0, days, ctx.author.id, hours) for _ in range(n)]
     packs_dir = Path("packs")
     packs_dir.mkdir(exist_ok=True)
-    fname = packs_dir / f"funpay_{days}d_{n}_{int(time.time())}.txt"
+    tag = f"{hours}h" if hours > 0 else f"{days}d"
+    fname = packs_dir / f"funpay_{tag}_{n}_{int(time.time())}.txt"
     fname.write_text(
-        f"LUMI keys — {days} days x {n} (universal, guild_id=0)\n\n" + "\n".join(codes) + "\n",
+        f"LUMI keys — {_dur_label(days, hours)} x {n} (personal, guild_id=0)\n\n" + "\n".join(codes) + "\n",
         encoding="utf-8",
     )
     try:
         await ctx.author.send(
-            f"📦 Пачка готова: **{n}** шт. × **{days}** дн. (универсальные). Файл ниже — заливай в FunPay как автовыдачу.",
+            f"📦 Пачка готова: **{n}** шт. × **{_dur_label(days, hours)}** (личные, universal). Файл ниже — заливай в FunPay как автовыдачу.",
             file=discord.File(str(fname)),
         )
         await ctx.send("✅ Пачка отправлена тебе в ЛС.")
@@ -2009,6 +2114,22 @@ async def on_interaction(interaction: discord.Interaction):
 
 @bot.event
 async def on_message(message):
+    # Антиспам команд: 5 команд / 10 сек на пользователя (владельцы бота исключены).
+    if (
+        not message.author.bot
+        and message.guild
+        and message.content.startswith("!")
+        and message.author.id not in OWNER_IDS
+        and not _rate_ok(message.author.id)
+    ):
+        last = _CMD_WARNED.get(message.author.id, 0)
+        if time.time() - last > 60:
+            _CMD_WARNED[message.author.id] = time.time()
+            try:
+                await message.reply("⏳ Слишком часто. Подожди 10 секунд и повтори.")
+            except Exception:
+                pass
+        return
     await bot.process_commands(message)
     if message.author.bot:
         return
@@ -2031,26 +2152,29 @@ async def on_message(message):
     # ── «Луми, …» — ИИ-чат (премиум) ──
     if re.match(r"^(луми|lumi)[\s,]", message.content, re.IGNORECASE):
         prompt = re.sub(r"^(луми|lumi)[\s,]*", "", message.content, flags=re.IGNORECASE).strip()
-        if not db.is_premium(message.guild.id, message.author.id):
-            embed = discord.Embed(
-                title="👑 Это премиум-функция",
-                description=(
-                    f"{message.author.mention}, общение с **Луми** доступно только с премиумом.\n"
-                    "Купи ключ на сайте **lumi.site** (промокод `LumiAI` −10%) или спроси у админа сервера."
-                ),
-                color=0x8B5CF6,
-            )
-            await message.reply(embed=embed)
+        ok, reason = authorize(user_id=message.author.id, guild_id=message.guild.id,
+                               feature="ai", check_rate=True)
+        if not ok:
+            if reason == "no_license":
+                embed = discord.Embed(
+                    title="👑 Это премиум-функция",
+                    description=(
+                        f"{message.author.mention}, общение с **Луми** доступно только с премиумом.\n"
+                        "Купи ключ на FunPay или сайте (промокод `LumiAI` −10%), затем: `!активировать LU-XXXX-XXXX`"
+                    ),
+                    color=0x8B5CF6,
+                )
+                await message.reply(embed=embed)
+            elif reason == "ai_limit":
+                await message.reply(
+                    f"⏳ Дневной лимит ИИ исчерпан ({AI_DAILY_LIMIT}/{AI_DAILY_LIMIT}). "
+                    "Лимит обновится завтра. Остались вопросы — пиши админу сервера."
+                )
+            else:
+                await message.reply("⏳ Слишком часто. Подожди 10 секунд и повтори.")
             return
         if not prompt:
             await message.reply("Пример: `Луми, расскажи анекдот`")
-            return
-        used = db.get_ai_usage(0, message.author.id)
-        if used >= AI_DAILY_LIMIT:
-            await message.reply(
-                f"⏳ Дневной лимит ИИ исчерпан ({AI_DAILY_LIMIT}/{AI_DAILY_LIMIT}). "
-                "Лимит обновится завтра. Остались вопросы — пиши админу сервера."
-            )
             return
         async with message.channel.typing():
             try:
