@@ -1675,20 +1675,37 @@ async def music_loop():
         await asyncio.sleep(5)
 
 
+def _plural(n: int, one: str, few: str, many: str) -> str:
+    n = abs(n) % 100
+    d = n % 10
+    if 10 < n < 20:
+        return many
+    if d == 1:
+        return one
+    if 1 < d < 5:
+        return few
+    return many
+
+
 async def status_loop():
-    """Обновляет статус бота: играет для N серверов."""
+    """Вращающийся статус-витрина бота."""
+    i = 0
     while True:
         try:
             n = len(bot.guilds)
-            await bot.change_presence(
-                activity=discord.Activity(
-                    type=discord.ActivityType.listening,
-                    name=f"музыку для {n} серверов 🎵",
-                )
-            )
+            word = _plural(n, "сервер", "сервера", "серверов")
+            statuses = [
+                (discord.ActivityType.playing, "🎵 Музыка без лимитов | !помощь"),
+                (discord.ActivityType.listening, "Луми, ... — ИИ-чат 👑"),
+                (discord.ActivityType.watching, f"{n} {word} • 60+ команд"),
+                (discord.ActivityType.competing, "👑 Premium от 499₽"),
+            ]
+            atype, name = statuses[i % len(statuses)]
+            i += 1
+            await bot.change_presence(activity=discord.Activity(type=atype, name=name))
         except Exception:
             pass
-        await asyncio.sleep(600)
+        await asyncio.sleep(90)
 
 
 async def lottery_loop():
