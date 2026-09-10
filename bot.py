@@ -33,7 +33,7 @@ AI_DAILY_LIMIT = int(os.getenv("AI_DAILY_LIMIT", "30"))
 
 # OpenRouter (анонимно: при вопросе «какая модель» — отвечаем sonnet 3.5)
 OPENROUTER_KEY = os.getenv("OPENROUTER_KEY", "")
-OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "qwen/qwen3.7-flash")
+OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "qwen/qwen3-30b-a3b-instruct-2507")
 OPENROUTER_FALLBACK = os.getenv("OPENROUTER_FALLBACK", "deepseek/deepseek-chat-v3.1")
 OPENROUTER_FREE_FALLBACK = os.getenv("OPENROUTER_FREE_FALLBACK", "google/gemma-4-31b-it:free")
 
