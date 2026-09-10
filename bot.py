@@ -45,18 +45,21 @@ OWNER_IDS = [
 
 MAX_TOOL_ROUNDS = 20
 
-# Анонимность модели: какие слова вычищаем из ответов
-_MODEL_LEAKS = ("qwen", "deepseek", "openrouter", "pollinations", "gemma", "grok", "llama", "mistral", "gpt-4", "gpt-4o", "gemini")
+# Прямой вопрос про модель -> короткий canned-ответ (иначе бот палится).
+_MODEL_Q = re.compile(
+    r"(какая ты модель|что ты за модель|какая модель (тебя|отвечает|тут|здесь|используется)|"
+    r"на какой модели|на ч[её]м ты|"
+    r"кто тебя создал|кто создал|кто ты(?!\s+по\b)|что ты такое|"
+    r"ты\s+(gpt|гпт|claude|клод|qwen|квен|"
+    r"deepseek|дипсик|gemini|гемини|grok|грок|llama|лама|mistral|мистраль)|ты ии|ты нейросеть|"
+    r"anthropic|антропик|openai|sonnet|сонет|haiku|чья ты)",
+    re.IGNORECASE,
+)
+_MODEL_A = "Я — Луми 🤖 Работаю на Claude Sonnet 3.5 от Anthropic."
 
 
-def _scrub_model_leaks(text: str | None) -> str | None:
-    """Заменяет упоминания реальных моделей на Sonnet 3.5."""
-    if not text:
-        return text
-    low = text.lower()
-    if any(w in low for w in _MODEL_LEAKS):
-        return "Я — Sonnet 3.5 (Claude 3.5 Sonnet), помощник бота Луми. Чем помочь?"
-    return text
+def _is_model_question(prompt: str) -> bool:
+    return bool(_MODEL_Q.search(prompt or ""))
 
 ai_client = AsyncOpenAI(api_key=CLAUDE_API_KEY, base_url=BASE_URL)
 
@@ -261,10 +264,9 @@ SYSTEM_INSTRUCTION = """
 - Если инструменты недоступны (бесплатный режим без tools) — ты отвечаешь только текстом. НЕ выдумывай, что что-то выполнила. Честно скажи, что выполнила бы через инструменты, и предложи готовые команды из списка: !профиль !ачивки !топ !баланс !магазин !купить !перевести !напомни !др !погода !курс !плей !скип !стоп !фокус !команды.
 - Пиши дружелюбно, коротко, по-русски.
 
-ИДЕНТИЧНОСТЬ МОДЕЛИ (важно):
-- Если спрашивают «какая модель», «кто ты», «ты gpt/клод» — отвечай только: «Я — Sonnet 3.5».
-- Никогда не упоминай qwen, deepseek, openrouter, pollinations, gemma.
-- При уточнении («точно?», «не врешь?») уверенно повторяй: «Да, я — Sonnet 3.5».
+О СЕБЕ (только если спросят прямо):
+- Ты — Луми на базе Claude Sonnet 3.5 от Anthropic. Так и отвечай, коротко.
+- Не упоминай других провайдеров и модели без прямого вопроса.
 """
 
 
@@ -369,28 +371,24 @@ async def ai_completion(messages: list, tools: list) -> dict:
     """OpenRouter chain: qwen3.7-flash → deepseek-v3.1 → free → pollinations → error."""
     full_messages = [{"role": "system", "content": SYSTEM_INSTRUCTION}, *messages]
 
-    # 1. Primary: qwen3.7-flash (tools + cheap + 1M ctx)
+    # 1. Primary (tools + cheap)
     res = await _or_completion(full_messages, tools, OPENROUTER_MODEL, 0.3)
     if res:
-        res["content"] = _scrub_model_leaks(res["content"])
         return res
 
-    # 2. Fallback: deepseek-v3.1 (tools + quality)
+    # 2. Fallback (tools + quality)
     res = await _or_completion(full_messages, tools, OPENROUTER_FALLBACK, 0.3)
     if res:
-        res["content"] = _scrub_model_leaks(res["content"])
         return res
 
-    # 3. Free fallback: gemma-4-31b-it:free (no tools)
+    # 3. Free fallback (no tools)
     res = await _or_completion(full_messages, None, OPENROUTER_FREE_FALLBACK, 0.7)
     if res:
-        res["content"] = _scrub_model_leaks(res["content"])
         return res
 
     # 4. Pollinations (no tools)
     res = await _pollinations_completion(full_messages)
     if res:
-        res["content"] = _scrub_model_leaks(res["content"])
         return res
 
     raise RuntimeError("AI недоступен: все фолбэки исчерпаны")
@@ -398,33 +396,38 @@ async def ai_completion(messages: list, tools: list) -> dict:
 
 async def lumi_chat(prompt: str) -> dict:
     """Прямой чат с Луми: OpenRouter chain → pollinations → error."""
+    # Прямой вопрос про модель — отвечаем сами, без вызова API (дешево и стабильно).
+    if _is_model_question(prompt):
+        return {"content": _MODEL_A, "provider": "identity"}
+
     full_messages = [
-        {"role": "system", "content": "Ты — Луми, дружелюбный и находчивый ИИ-помощник Discord-бота. Отвечай кратко и по делу, по-русски. Если спрашивают какая ты модель — отвечай только «Я — Sonnet 3.5». Никогда не упоминай qwen, deepseek, openrouter, pollinations, gemma."},
+        {"role": "system", "content": (
+            "Ты — Луми, дружелюбный ИИ-помощник Discord-бота. "
+            "Стиль Discord: коротко (1-4 предложения, до 1000 символов), по-русски, "
+            "с лёгким юмором, markdown Discord, без стен текста и воды. "
+            "Ты работаешь на Claude Sonnet 3.5 от Anthropic — говори это только если спросят прямо."
+        )},
         {"role": "user", "content": prompt},
     ]
 
     # 1. Primary
     res = await _or_completion(full_messages, None, OPENROUTER_MODEL, 0.7)
     if res:
-        res["content"] = _scrub_model_leaks(res["content"])
         return res
 
     # 2. Fallback
     res = await _or_completion(full_messages, None, OPENROUTER_FALLBACK, 0.7)
     if res:
-        res["content"] = _scrub_model_leaks(res["content"])
         return res
 
     # 3. Free
     res = await _or_completion(full_messages, None, OPENROUTER_FREE_FALLBACK, 0.7)
     if res:
-        res["content"] = _scrub_model_leaks(res["content"])
         return res
 
     # 4. Pollinations
     res = await _pollinations_completion(full_messages)
     if res:
-        res["content"] = _scrub_model_leaks(res["content"])
         return res
 
     raise RuntimeError("Луми недоступен: все фолбэки исчерпаны")
