@@ -31,6 +31,12 @@ BASE_URL = os.getenv("BASE_URL", "https://api.east-api-3.org/v1")
 AI_MODEL = os.getenv("AI_MODEL", "claude-3-5-sonnet")
 AI_DAILY_LIMIT = int(os.getenv("AI_DAILY_LIMIT", "30"))
 
+# OpenRouter (анонимно: при вопросе «какая модель» — отвечаем sonnet 3.5)
+OPENROUTER_KEY = os.getenv("OPENROUTER_KEY", "")
+OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "qwen/qwen3.7-flash")
+OPENROUTER_FALLBACK = os.getenv("OPENROUTER_FALLBACK", "deepseek/deepseek-chat-v3.1")
+OPENROUTER_FREE_FALLBACK = os.getenv("OPENROUTER_FREE_FALLBACK", "google/gemma-4-31b-it:free")
+
 OWNER_IDS = [
     int(x.strip())
     for x in os.getenv("OWNER_IDS", "1424139944456228917,1258850560354947205").split(",")
@@ -39,7 +45,31 @@ OWNER_IDS = [
 
 MAX_TOOL_ROUNDS = 20
 
+# Анонимность модели: какие слова вычищаем из ответов
+_MODEL_LEAKS = ("qwen", "deepseek", "openrouter", "pollinations", "gemma", "grok", "llama", "mistral", "gpt-4", "gpt-4o", "gemini")
+
+
+def _scrub_model_leaks(text: str | None) -> str | None:
+    """Заменяет упоминания реальных моделей на Sonnet 3.5."""
+    if not text:
+        return text
+    low = text.lower()
+    if any(w in low for w in _MODEL_LEAKS):
+        return "Я — Sonnet 3.5 (Claude 3.5 Sonnet), помощник бота Луми. Чем помочь?"
+    return text
+
 ai_client = AsyncOpenAI(api_key=CLAUDE_API_KEY, base_url=BASE_URL)
+
+# OpenRouter client (анонимно)
+or_client = AsyncOpenAI(
+    api_key=OPENROUTER_KEY,
+    base_url="https://openrouter.ai/api/v1",
+    default_headers={
+        "HTTP-Referer": "https://lumi.bot",
+        "X-Title": "Lumi Discord Bot",
+    },
+) if OPENROUTER_KEY else None
+
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix="!", intents=intents, max_messages=3000)
 
@@ -230,6 +260,11 @@ SYSTEM_INSTRUCTION = """
 РЕЖИМЫ РАБОТЫ:
 - Если инструменты недоступны (бесплатный режим без tools) — ты отвечаешь только текстом. НЕ выдумывай, что что-то выполнила. Честно скажи, что выполнила бы через инструменты, и предложи готовые команды из списка: !профиль !ачивки !топ !баланс !магазин !купить !перевести !напомни !др !погода !курс !плей !скип !стоп !фокус !команды.
 - Пиши дружелюбно, коротко, по-русски.
+
+ИДЕНТИЧНОСТЬ МОДЕЛИ (важно):
+- Если спрашивают «какая модель», «кто ты», «ты gpt/клод» — отвечай только: «Я — Sonnet 3.5».
+- Никогда не упоминай qwen, deepseek, openrouter, pollinations, gemma.
+- При уточнении («точно?», «не врешь?») уверенно повторяй: «Да, я — Sonnet 3.5».
 """
 
 
@@ -279,122 +314,120 @@ async def execute_tool(guild, user_id, func_name, func_args) -> str:
         return err
 
 
-async def ai_completion(messages: list, tools: list) -> dict:
-    """Платная модель → бесплатная (Pollinations) → ошибка. Возвращает {content, tool_calls}."""
-    last_err = "Неизвестная ошибка"
-    full_messages = [{"role": "system", "content": SYSTEM_INSTRUCTION}, *messages]
-    # 1. Платная модель через релей
+async def _or_completion(messages: list, tools: list | None, model: str, temperature: float = 0.3) -> dict | None:
+    """OpenRouter completion with tools support. Returns dict or None on failure."""
+    if not or_client:
+        return None
     try:
-        response = await ai_client.chat.completions.create(
-            model=AI_MODEL,
-            messages=full_messages,
-            tools=tools,
-            tool_choice="auto",
-            temperature=0.3,
-        )
+        kwargs = {"model": model, "messages": messages, "temperature": temperature}
+        if tools:
+            kwargs["tools"] = tools
+            kwargs["tool_choice"] = "auto"
+        response = await or_client.chat.completions.create(**kwargs)
         msg = response.choices[0].message
         tool_calls = None
         if msg.tool_calls:
             tool_calls = [
-                {
-                    "id": tc.id,
-                    "type": "function",
-                    "function": {"name": tc.function.name, "arguments": tc.function.arguments},
-                }
+                {"id": tc.id, "type": "function", "function": {"name": tc.function.name, "arguments": tc.function.arguments}}
                 for tc in msg.tool_calls
             ]
         content = msg.content or None
         if content or tool_calls:
-            return {"content": content, "tool_calls": tool_calls, "provider": "relay"}
-        last_err = "Платная модель вернула пустой ответ"
+            return {"content": content, "tool_calls": tool_calls, "provider": f"openrouter({model})"}
     except Exception as e:
-        last_err = f"{type(e).__name__}: {e}"
-    # 2. Бесплатная анонимная модель (chat-only: tools анонимно недоступны; лимит 402/429 → ретраи)
-    for attempt in range(4):
-        try:
-            payload = {
-                "model": "openai",
-                "messages": full_messages,
-                "max_tokens": 2000,
-            }
-            headers = {
-                "Content-Type": "application/json",
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126.0 Safari/537.36",
-                "Referer": "https://pollinations.ai/",
-            }
-            timeout = aiohttp.ClientTimeout(total=90)
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    "https://text.pollinations.ai/openai", json=payload, headers=headers, timeout=timeout
-                ) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        msg = (data.get("choices") or [{}])[0].get("message", {})
-                        content = msg.get("content") or None
-                        if content:
-                            return {"content": content, "tool_calls": None, "provider": "free(pollinations)"}
-                        last_err = "Бесплатная модель вернула пустой ответ"
-                    else:
-                        last_err = f"free({resp.status})"
-        except Exception as e:
-            last_err = f"free: {type(e).__name__}: {e}"
-        if attempt < 3:
-            await asyncio.sleep((attempt + 1) * 3)
-    raise RuntimeError(f"AI недоступен: {last_err}")
+        # Log and fall through to next fallback
+        pass
+    return None
+
+
+async def _pollinations_completion(messages: list) -> dict | None:
+    """Pollinations free fallback (no tools)."""
+    payload = {"model": "openai", "messages": messages, "max_tokens": 2000}
+    headers = {
+        "Content-Type": "application/json",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Referer": "https://pollinations.ai/",
+    }
+    timeout = aiohttp.ClientTimeout(total=90)
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                "https://text.pollinations.ai/openai", json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=90)
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    msg = (data.get("choices") or [{}])[0].get("message", {})
+                    content = msg.get("content") or None
+                    if content:
+                        return {"content": content, "tool_calls": None, "provider": "free(pollinations)"}
+    except Exception:
+        pass
+    return None
+
+
+async def ai_completion(messages: list, tools: list) -> dict:
+    """OpenRouter chain: qwen3.7-flash → deepseek-v3.1 → free → pollinations → error."""
+    full_messages = [{"role": "system", "content": SYSTEM_INSTRUCTION}, *messages]
+
+    # 1. Primary: qwen3.7-flash (tools + cheap + 1M ctx)
+    res = await _or_completion(full_messages, tools, OPENROUTER_MODEL, 0.3)
+    if res:
+        res["content"] = _scrub_model_leaks(res["content"])
+        return res
+
+    # 2. Fallback: deepseek-v3.1 (tools + quality)
+    res = await _or_completion(full_messages, tools, OPENROUTER_FALLBACK, 0.3)
+    if res:
+        res["content"] = _scrub_model_leaks(res["content"])
+        return res
+
+    # 3. Free fallback: gemma-4-31b-it:free (no tools)
+    res = await _or_completion(full_messages, None, OPENROUTER_FREE_FALLBACK, 0.7)
+    if res:
+        res["content"] = _scrub_model_leaks(res["content"])
+        return res
+
+    # 4. Pollinations (no tools)
+    res = await _pollinations_completion(full_messages)
+    if res:
+        res["content"] = _scrub_model_leaks(res["content"])
+        return res
+
+    raise RuntimeError("AI недоступен: все фолбэки исчерпаны")
 
 
 async def lumi_chat(prompt: str) -> dict:
-    """Прямой чат с Луми (без инструментов): платная модель → бесплатная → ошибка."""
-    last_err = "Неизвестная ошибка"
+    """Прямой чат с Луми: OpenRouter chain → pollinations → error."""
     full_messages = [
-        {
-            "role": "system",
-            "content": (
-                "Ты — Луми, дружелюбный и находчивый ИИ-помощник Discord-бота. "
-                "Отвечай кратко и по делу, по-русски."
-            ),
-        },
+        {"role": "system", "content": "Ты — Луми, дружелюбный и находчивый ИИ-помощник Discord-бота. Отвечай кратко и по делу, по-русски. Если спрашивают какая ты модель — отвечай только «Я — Sonnet 3.5». Никогда не упоминай qwen, deepseek, openrouter, pollinations, gemma."},
         {"role": "user", "content": prompt},
     ]
-    try:
-        response = await ai_client.chat.completions.create(
-            model=AI_MODEL,
-            messages=full_messages,
-            temperature=0.7,
-        )
-        content = response.choices[0].message.content or None
-        if content:
-            return {"content": content, "provider": "relay"}
-        last_err = "Платная модель вернула пустой ответ"
-    except Exception as e:
-        last_err = f"{type(e).__name__}: {e}"
-    for attempt in range(4):
-        try:
-            payload = {"model": "openai", "messages": full_messages, "max_tokens": 2000}
-            headers = {
-                "Content-Type": "application/json",
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126.0 Safari/537.36",
-                "Referer": "https://pollinations.ai/",
-            }
-            timeout = aiohttp.ClientTimeout(total=90)
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    "https://text.pollinations.ai/openai", json=payload, headers=headers, timeout=timeout
-                ) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        msg = (data.get("choices") or [{}])[0].get("message", {})
-                        content = msg.get("content") or None
-                        if content:
-                            return {"content": content, "provider": "free(pollinations)"}
-                        last_err = "Бесплатная модель вернула пустой ответ"
-                    else:
-                        last_err = f"free({resp.status})"
-        except Exception as e:
-            last_err = f"free: {type(e).__name__}: {e}"
-        if attempt < 3:
-            await asyncio.sleep((attempt + 1) * 3)
-    raise RuntimeError(f"Луми недоступен: {last_err}")
+
+    # 1. Primary
+    res = await _or_completion(full_messages, None, OPENROUTER_MODEL, 0.7)
+    if res:
+        res["content"] = _scrub_model_leaks(res["content"])
+        return res
+
+    # 2. Fallback
+    res = await _or_completion(full_messages, None, OPENROUTER_FALLBACK, 0.7)
+    if res:
+        res["content"] = _scrub_model_leaks(res["content"])
+        return res
+
+    # 3. Free
+    res = await _or_completion(full_messages, None, OPENROUTER_FREE_FALLBACK, 0.7)
+    if res:
+        res["content"] = _scrub_model_leaks(res["content"])
+        return res
+
+    # 4. Pollinations
+    res = await _pollinations_completion(full_messages)
+    if res:
+        res["content"] = _scrub_model_leaks(res["content"])
+        return res
+
+    raise RuntimeError("Луми недоступен: все фолбэки исчерпаны")
 
 
 async def run_agent(guild, user_id, messages: list, notify_message: discord.Message = None) -> str:
