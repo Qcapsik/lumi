@@ -1,0 +1,18 @@
+[project]
+name = "lumi"
+version = "2.4.0"
+description = "Lumi — универсальный Discord-бот + веб-панель (музыка, экономика, модерация, ИИ-чат, лицензии)"
+readme = "README.md"
+requires-python = ">=3.12"
+authors = [
+    { name = "Qcaps" },
+    { name = "lev4ak" },
+]
+keywords = ["discord", "bot", "fastapi", "stripe"]
+classifiers = [
+    "Programming Language :: Python :: 3.12",
+    "License :: Other/Proprietary License",
+]
+
+[tool.setuptools]
+py-modules = ["bot", "components", "database", "discord_tools", "mailer", "music", "services", "web_server"]
